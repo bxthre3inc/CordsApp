@@ -1,0 +1,53 @@
+# Git Ignore for Cords Project
+
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Production
+/build
+/dist
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+/.nyc_output
+/coverage
+
+# Misc
+.cache
+*.pem
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Database
+*.sql.gz
+
+# Backups
+/backups/
+
+# Package lock files (optional based on preference)
+# package-lock.json
+# yarn.lock

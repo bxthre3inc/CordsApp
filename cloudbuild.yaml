@@ -1,0 +1,93 @@
+steps:
+  # Build backend Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/cords-repo/backend:$SHORT_SHA'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/cords-repo/backend:latest'
+      - '-f'
+      - 'backend/Dockerfile'
+      - './backend'
+    id: 'build-backend'
+
+  # Push backend to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/cords-repo/backend:latest'
+    id: 'push-backend'
+
+  # Build frontend Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/cords-repo/frontend:$SHORT_SHA'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/cords-repo/frontend:latest'
+      - '-f'
+      - 'frontend/Dockerfile'
+      - './frontend'
+    id: 'build-frontend'
+
+  # Push frontend to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/cords-repo/frontend:latest'
+    id: 'push-frontend'
+
+  # Deploy backend to Cloud Run
+  - name: 'gcr.io/cloud-builders/gke-deploy'
+    args:
+      - 'run'
+      - '--filename=k8s/backend/'
+      - '--image=us-central1-docker.pkg.dev/$PROJECT_ID/cords-repo/backend:$SHORT_SHA'
+      - '--location=us-central1'
+      - '--namespace=cords'
+    id: 'deploy-backend'
+    env:
+      - 'CLOUDSDK_COMPUTE_REGION=us-central1'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=cords-cluster'
+
+  # Deploy frontend to Cloud Run
+  - name: 'gcr.io/cloud-builders/gke-deploy'
+    args:
+      - 'run'
+      - '--filename=k8s/frontend/'
+      - '--image=us-central1-docker.pkg.dev/$PROJECT_ID/cords-repo/frontend:$SHORT_SHA'
+      - '--location=us-central1'
+      - '--namespace=cords'
+    id: 'deploy-frontend'
+    env:
+      - 'CLOUDSDK_COMPUTE_REGION=us-central1'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=cords-cluster'
+
+  # Run database migrations
+  - name: 'gcr.io/cloud-builders/kubectl'
+    args:
+      - 'set'
+      - 'image'
+      - 'deployment/cords-migrate'
+      - 'migrate=us-central1-docker.pkg.dev/$PROJECT_ID/cords-repo/backend:$SHORT_SHA'
+      - '--namespace=cords'
+    id: 'migrate-db'
+    env:
+      - 'CLOUDSDK_COMPUTE_REGION=us-central1'
+      - 'CLOUDSDK_CONTAINER_CLUSTER=cords-cluster'
+
+images:
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/cords-repo/backend:latest'
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/cords-repo/backend:$SHORT_SHA'
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/cords-repo/frontend:latest'
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/cords-repo/frontend:$SHORT_SHA'
+
+substitutions:
+  _REGION: 'us-central1'
+
+options:
+  machineType: 'N1_HIGHCPU_8'
+
+timeout: '1200s'

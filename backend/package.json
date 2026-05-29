@@ -1,0 +1,35 @@
+{
+  "name": "cords-backend",
+  "version": "1.0.0",
+  "description": "Cords - Local Wood Delivery Marketplace Backend",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "jest",
+    "migrate": "node database/migrate.js"
+  },
+  "keywords": ["marketplace", "wood", "delivery"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "express-validator": "^7.0.0",
+    "jsonwebtoken": "^9.0.0",
+    "bcryptjs": "^2.4.3",
+    "pg": "^8.9.0",
+    "dotenv": "^16.0.3",
+    "cors": "^2.8.5",
+    "helmet": "^7.0.0",
+    "stripe": "^12.0.0",
+    "mapbox-sdk": "^0.15.0",
+    "nodemailer": "^6.9.0",
+    "socket.io": "^4.5.4",
+    "axios": "^1.4.0"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22",
+    "jest": "^29.5.0",
+    "supertest": "^6.3.3"
+  }
+}
