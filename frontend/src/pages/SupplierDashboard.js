@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { orderService, productService, subscriptionService, paymentService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { WOOD_TYPE_GROUPS, UNITS } from '../utils/woodTypes';
 
 const STATUS_COLORS = {
   pending: 'bg-yellow-100 text-yellow-700',
@@ -10,7 +11,12 @@ const STATUS_COLORS = {
   cancelled: 'bg-red-100 text-red-700',
 };
 
-const woodTypes = ['Oak', 'Maple', 'Pine', 'Cherry', 'Walnut', 'Birch', 'Ash', 'Cedar'];
+const SEASONING_LABELS = {
+  kiln_dried: { label: 'Kiln Dried',  color: 'bg-orange-100 text-orange-700' },
+  seasoned:   { label: 'Seasoned',    color: 'bg-green-100 text-green-700' },
+  seasoning:  { label: 'Seasoning',   color: 'bg-yellow-100 text-yellow-700' },
+  green:      { label: 'Green Wood',  color: 'bg-gray-100 text-gray-600' },
+};
 
 const PLANS = [
   {
@@ -47,6 +53,13 @@ const PLANS = [
     color: 'border-orange-400',
   },
 ];
+
+const EMPTY_PRODUCT = {
+  woodType: '', quantity: '', unit: 'cord', pricePerUnit: '', description: '',
+  pickupAvailable: false, pickupAddress: '',
+  seasoningStatus: 'seasoned', moisturePct: '', certification: '',
+  isWholesale: false, minOrderQty: 1, countryCode: '', regionName: '',
+};
 
 function OrderDetailModal({ order, onClose }) {
   if (!order) return null;
@@ -156,10 +169,7 @@ export default function SupplierDashboard() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [planData, setPlanData] = useState(null);
   const [planLoading, setPlanLoading] = useState(false);
-  const [newProduct, setNewProduct] = useState({
-    woodType: '', quantity: '', unit: 'cord', pricePerUnit: '', description: '',
-    pickupAvailable: false, pickupAddress: ''
-  });
+  const [newProduct, setNewProduct] = useState(EMPTY_PRODUCT);
 
   useEffect(() => { loadData(); }, []);
 
@@ -206,18 +216,25 @@ export default function SupplierDashboard() {
       });
       const location = await getLocation();
       await productService.create({
-        woodType: newProduct.woodType,
-        quantity: parseFloat(newProduct.quantity),
-        unit: newProduct.unit,
-        pricePerUnit: parseFloat(newProduct.pricePerUnit),
+        woodType:       newProduct.woodType,
+        quantity:       parseFloat(newProduct.quantity),
+        unit:           newProduct.unit,
+        pricePerUnit:   parseFloat(newProduct.pricePerUnit),
         location,
-        description: newProduct.description,
+        description:    newProduct.description,
         pickupAvailable: newProduct.pickupAvailable,
-        pickupAddress: newProduct.pickupAvailable && newProduct.pickupAddress
-          ? { address: newProduct.pickupAddress }
-          : null
+        pickupAddress:  newProduct.pickupAvailable && newProduct.pickupAddress
+                          ? { address: newProduct.pickupAddress }
+                          : null,
+        seasoningStatus: newProduct.seasoningStatus,
+        moisturePct:    newProduct.moisturePct ? parseFloat(newProduct.moisturePct) : null,
+        certification:  newProduct.certification || null,
+        isWholesale:    newProduct.isWholesale,
+        minOrderQty:    parseFloat(newProduct.minOrderQty) || 1,
+        countryCode:    newProduct.countryCode || null,
+        regionName:     newProduct.regionName  || null,
       });
-      setNewProduct({ woodType: '', quantity: '', unit: 'cord', pricePerUnit: '', description: '', pickupAvailable: false, pickupAddress: '' });
+      setNewProduct(EMPTY_PRODUCT);
       setShowAddProduct(false);
       showToast('Product added');
       loadData();
@@ -262,6 +279,9 @@ export default function SupplierDashboard() {
     } catch { showToast('Failed to cancel', 'error'); }
   };
 
+  const np = newProduct;
+  const set = (field, val) => setNewProduct(p => ({ ...p, [field]: val }));
+
   const pendingCount = orders.filter(o => o.status === 'pending').length;
   const monthRevenue = orders.filter(o => o.status === 'delivered').reduce((sum, o) => sum + parseFloat(o.total_price || 0), 0);
 
@@ -300,9 +320,9 @@ export default function SupplierDashboard() {
 
         <div className="flex gap-2 mb-6">
           {[
-            { key: 'orders', label: `Orders${pendingCount > 0 ? ` (${pendingCount} pending)` : ''}` },
+            { key: 'orders',    label: `Orders${pendingCount > 0 ? ` (${pendingCount} pending)` : ''}` },
             { key: 'inventory', label: 'Inventory' },
-            { key: 'plan', label: 'My Plan' },
+            { key: 'plan',      label: 'My Plan' },
           ].map(t => (
             <button key={t.key} onClick={() => handleTabChange(t.key)}
               className={`px-5 py-2 rounded-lg text-sm font-medium ${tab === t.key ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:border-blue-300'}`}>
@@ -311,6 +331,7 @@ export default function SupplierDashboard() {
           ))}
         </div>
 
+        {/* Orders tab */}
         {tab === 'orders' && (
           <div className="bg-white rounded-xl shadow overflow-hidden">
             <div className="divide-y divide-gray-100">
@@ -324,8 +345,8 @@ export default function SupplierDashboard() {
                 <div key={o.id} className="p-5 flex justify-between items-start hover:bg-gray-50 cursor-pointer" onClick={() => setSelectedOrder(o)}>
                   <div>
                     <div className="flex items-center gap-2 mb-1">
-                      <p className="font-semibold text-gray-900">{o.wood_type} × {o.quantity} cords</p>
-                      {o.delivery_type === 'pickup' && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Pickup</span>}
+                      <p className="font-semibold text-gray-900">{o.wood_type} × {o.quantity} {o.unit || 'cords'}</p>
+                      {o.delivery_type === 'pickup'  && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Pickup</span>}
                       {o.delivery_type === 'express' && <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">Express</span>}
                       {parseFloat(o.stacking_fee || 0) > 0 && <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">🪵 Stack</span>}
                     </div>
@@ -348,6 +369,7 @@ export default function SupplierDashboard() {
           </div>
         )}
 
+        {/* Inventory tab */}
         {tab === 'inventory' && (
           <div>
             <div className="flex justify-between items-center mb-4">
@@ -361,60 +383,148 @@ export default function SupplierDashboard() {
             {showAddProduct && (
               <div className="bg-white rounded-xl shadow p-6 mb-5">
                 <h3 className="font-semibold text-gray-900 mb-4">New Listing</h3>
-                <form onSubmit={handleAddProduct} className="space-y-4">
+                <form onSubmit={handleAddProduct} className="space-y-5">
+                  {/* Basic info */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Wood type *</label>
-                      <select required value={newProduct.woodType} onChange={e => setNewProduct({ ...newProduct, woodType: e.target.value })}
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Wood species *</label>
+                      <select required value={np.woodType} onChange={e => set('woodType', e.target.value)}
                         className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
-                        <option value="">Select type</option>
-                        {woodTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                        <option value="">Select species</option>
+                        {WOOD_TYPE_GROUPS.map(g => (
+                          <optgroup key={g.region} label={g.region}>
+                            {g.types.map(t => <option key={t} value={t}>{t}</option>)}
+                          </optgroup>
+                        ))}
                       </select>
                     </div>
+
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Unit</label>
-                      <select value={newProduct.unit} onChange={e => setNewProduct({ ...newProduct, unit: e.target.value })}
+                      <select value={np.unit} onChange={e => set('unit', e.target.value)}
                         className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
-                        <option value="cord">Cord (full)</option>
-                        <option value="half_cord">Half cord</option>
-                        <option value="face_cord">Face cord</option>
-                        <option value="board_foot">Board foot</option>
-                        <option value="ton">Ton</option>
+                        {UNITS.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
                       </select>
                     </div>
+
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Quantity *</label>
-                      <input required type="number" step="0.5" min="0.5" value={newProduct.quantity}
-                        onChange={e => setNewProduct({ ...newProduct, quantity: e.target.value })}
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Quantity available *</label>
+                      <input required type="number" step="0.5" min="0.5" value={np.quantity}
+                        onChange={e => set('quantity', e.target.value)}
                         className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" placeholder="12" />
                     </div>
+
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Price per unit ($) *</label>
-                      <input required type="number" step="0.01" min="1" value={newProduct.pricePerUnit}
-                        onChange={e => setNewProduct({ ...newProduct, pricePerUnit: e.target.value })}
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Price per {np.unit || 'unit'} ($) *</label>
+                      <input required type="number" step="0.01" min="1" value={np.pricePerUnit}
+                        onChange={e => set('pricePerUnit', e.target.value)}
                         className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" placeholder="285.00" />
                     </div>
+
                     <div className="md:col-span-2">
                       <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                      <textarea value={newProduct.description} onChange={e => setNewProduct({ ...newProduct, description: e.target.value })}
+                      <textarea value={np.description} onChange={e => set('description', e.target.value)}
                         className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" rows={2}
                         placeholder="Seasoned split oak, ready to burn..." />
                     </div>
                   </div>
 
+                  {/* Quality details */}
+                  <div className="border-t border-gray-100 pt-4">
+                    <h4 className="text-sm font-semibold text-gray-700 mb-3">Quality &amp; Details</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Seasoning status</label>
+                        <select value={np.seasoningStatus} onChange={e => set('seasoningStatus', e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                          <option value="kiln_dried">Kiln Dried (&lt;15% moisture)</option>
+                          <option value="seasoned">Seasoned (&lt;20% moisture)</option>
+                          <option value="seasoning">Seasoning (drying, 20–30%)</option>
+                          <option value="green">Green (freshly cut, &gt;30%)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Moisture % <span className="text-gray-400 font-normal">(optional)</span>
+                        </label>
+                        <input type="number" step="0.1" min="5" max="60" value={np.moisturePct}
+                          onChange={e => set('moisturePct', e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" placeholder="e.g. 18.5" />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Certification <span className="text-gray-400 font-normal">(optional)</span>
+                        </label>
+                        <select value={np.certification} onChange={e => set('certification', e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                          <option value="">None / not certified</option>
+                          <option value="FSC">FSC (Forest Stewardship Council)</option>
+                          <option value="PEFC">PEFC</option>
+                          <option value="SFI">SFI (Sustainable Forestry Initiative)</option>
+                          <option value="Rainforest Alliance">Rainforest Alliance</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Min order quantity
+                        </label>
+                        <input type="number" step="0.5" min="0.5" value={np.minOrderQty}
+                          onChange={e => set('minOrderQty', e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" placeholder="1" />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 mt-3">
+                      <input type="checkbox" id="isWholesale" checked={np.isWholesale}
+                        onChange={e => set('isWholesale', e.target.checked)}
+                        className="w-4 h-4 text-blue-600" />
+                      <label htmlFor="isWholesale" className="text-sm font-medium text-gray-700">
+                        Wholesale / bulk listing (B2B pricing)
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Location */}
+                  <div className="border-t border-gray-100 pt-4">
+                    <h4 className="text-sm font-semibold text-gray-700 mb-3">Location (for global price index)</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Country code <span className="text-gray-400 font-normal">(ISO 2-letter, e.g. US, GB, AU)</span>
+                        </label>
+                        <input type="text" maxLength={2} value={np.countryCode}
+                          onChange={e => set('countryCode', e.target.value.toUpperCase())}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono" placeholder="US" />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Region / State <span className="text-gray-400 font-normal">(optional)</span>
+                        </label>
+                        <input type="text" value={np.regionName}
+                          onChange={e => set('regionName', e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" placeholder="e.g. Colorado" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Pickup */}
                   <div className="border-t border-gray-100 pt-4">
                     <div className="flex items-center gap-3 mb-3">
-                      <input type="checkbox" id="pickupAvailable" checked={newProduct.pickupAvailable}
-                        onChange={e => setNewProduct({ ...newProduct, pickupAvailable: e.target.checked })}
+                      <input type="checkbox" id="pickupAvailable" checked={np.pickupAvailable}
+                        onChange={e => set('pickupAvailable', e.target.checked)}
                         className="w-4 h-4 text-green-600" />
                       <label htmlFor="pickupAvailable" className="text-sm font-medium text-gray-700">
                         Offer pickup at my location
                       </label>
                     </div>
-                    {newProduct.pickupAvailable && (
-                      <input value={newProduct.pickupAddress} onChange={e => setNewProduct({ ...newProduct, pickupAddress: e.target.value })}
+                    {np.pickupAvailable && (
+                      <input value={np.pickupAddress} onChange={e => set('pickupAddress', e.target.value)}
                         className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
-                        placeholder="Pickup address (e.g. 12 Woodyard Ln, Springfield, MA)" />
+                        placeholder="Pickup address (e.g. 12 Woodyard Ln, Springfield, CO)" />
                     )}
                   </div>
 
@@ -427,26 +537,40 @@ export default function SupplierDashboard() {
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {products.map(p => (
-                <div key={p.id} className="bg-white rounded-xl shadow p-5">
-                  <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <h3 className="font-semibold text-gray-900">{p.wood_type}</h3>
-                      <p className="text-sm text-gray-500">{p.quantity} {p.unit} · ${parseFloat(p.price_per_unit).toFixed(2)}/{p.unit}</p>
+              {products.map(p => {
+                const seasoning = SEASONING_LABELS[p.seasoning_status];
+                return (
+                  <div key={p.id} className="bg-white rounded-xl shadow p-5">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <h3 className="font-semibold text-gray-900">{p.wood_type}</h3>
+                        <p className="text-sm text-gray-500">{p.quantity} {p.unit} · ${parseFloat(p.price_per_unit).toFixed(2)}/{p.unit}</p>
+                      </div>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${p.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                        {p.active ? 'Active' : 'Inactive'}
+                      </span>
                     </div>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${p.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                      {p.active ? 'Active' : 'Inactive'}
-                    </span>
+                    {p.description && <p className="text-xs text-gray-400 mb-2 line-clamp-2">{p.description}</p>}
+                    <div className="flex flex-wrap gap-1 mb-3">
+                      {seasoning && (
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${seasoning.color}`}>{seasoning.label}</span>
+                      )}
+                      {p.certification && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">{p.certification}</span>
+                      )}
+                      {p.is_wholesale && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">Wholesale</span>
+                      )}
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <button onClick={() => togglePickup(p)}
+                        className={`text-xs px-3 py-1 rounded-lg font-medium ${p.pickup_available ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                        {p.pickup_available ? '📍 Pickup On' : '📍 Enable Pickup'}
+                      </button>
+                    </div>
                   </div>
-                  {p.description && <p className="text-xs text-gray-400 mb-3 line-clamp-2">{p.description}</p>}
-                  <div className="flex justify-between items-center">
-                    <button onClick={() => togglePickup(p)}
-                      className={`text-xs px-3 py-1 rounded-lg font-medium ${p.pickup_available ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
-                      {p.pickup_available ? '📍 Pickup On' : '📍 Enable Pickup'}
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
               {products.length === 0 && (
                 <div className="col-span-3 text-center py-10 text-gray-400">
                   <p>No listings yet. Add your first product above.</p>
@@ -456,6 +580,7 @@ export default function SupplierDashboard() {
           </div>
         )}
 
+        {/* Plan tab */}
         {tab === 'plan' && (
           <div>
             {planLoading && <p className="text-gray-400 text-center py-8">Loading plan info...</p>}
@@ -508,10 +633,8 @@ export default function SupplierDashboard() {
                         {isCurrent ? (
                           <div className="w-full py-2 text-center text-sm font-medium bg-gray-100 text-gray-500 rounded-lg">Current plan</div>
                         ) : (
-                          <button
-                            onClick={() => handleUpgrade(plan.key)}
-                            className="w-full py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                          >
+                          <button onClick={() => handleUpgrade(plan.key)}
+                            className="w-full py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                             {plan.key === 'enterprise' ? 'Contact us' : 'Upgrade'}
                           </button>
                         )}

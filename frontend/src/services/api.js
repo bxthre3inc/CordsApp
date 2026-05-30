@@ -102,4 +102,8 @@ export const enterpriseService = {
   cancelContract: (id) => apiClient.delete(`/enterprise/contracts/${id}`),
 };
 
+export const marketService = {
+  getPriceIndex: (params) => apiClient.get('/products/price-index', { params }),
+};
+
 export default apiClient;

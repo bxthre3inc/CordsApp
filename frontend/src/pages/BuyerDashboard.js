@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { productService, orderService, paymentService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import DeliveryLocationPicker from '../components/DeliveryLocationPicker';
+import { WOOD_TYPE_GROUPS } from '../utils/woodTypes';
 
 const STACKING_FEE_PER_CORD  = 15.00;
 const PROCESSING_FEE_RATE    = 0.02;
@@ -40,7 +41,12 @@ function calcDeliveryFee(supplierLocation, buyerLocation, quantity, isExpress) {
   return { miles: parseFloat(miles.toFixed(1)), ratePerMile, baseFee: BASE_DELIVERY_FEE, mileageFee, deliveryFee };
 }
 
-const woodTypes = ['Oak', 'Maple', 'Pine', 'Cherry', 'Walnut', 'Birch', 'Ash', 'Cedar'];
+const SEASONING_BADGES = {
+  kiln_dried: { label: 'Kiln Dried', color: 'bg-orange-100 text-orange-700' },
+  seasoned:   { label: 'Seasoned',   color: 'bg-green-100 text-green-700' },
+  seasoning:  { label: 'Seasoning',  color: 'bg-yellow-100 text-yellow-700' },
+  green:      { label: 'Green',      color: 'bg-gray-100 text-gray-600' },
+};
 
 const STATUS_COLORS = {
   pending: 'bg-yellow-100 text-yellow-700',
@@ -326,8 +332,12 @@ export default function BuyerDashboard() {
               <div className="flex flex-wrap gap-3 items-center">
                 <select value={selectedWoodType} onChange={e => setSelectedWoodType(e.target.value)}
                   className="px-4 py-2 border border-gray-200 rounded-lg text-sm">
-                  <option value="">All Wood Types</option>
-                  {woodTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                  <option value="">All Species</option>
+                  {WOOD_TYPE_GROUPS.map(g => (
+                    <optgroup key={g.region} label={g.region}>
+                      {g.types.map(t => <option key={t} value={t}>{t}</option>)}
+                    </optgroup>
+                  ))}
                 </select>
                 <button onClick={searchNearby} disabled={loading}
                   className="px-6 py-2 bg-blue-600 text-white rounded-lg font-medium text-sm hover:bg-blue-700 disabled:opacity-50">
@@ -361,15 +371,32 @@ export default function BuyerDashboard() {
                     </div>
                     <p className="text-gray-500 text-sm mt-1 line-clamp-2">{p.description}</p>
                     <div className="mt-3 flex justify-between items-center">
-                      <span className="text-2xl font-bold text-blue-600">${parseFloat(p.price_per_unit).toFixed(0)}<span className="text-sm font-normal text-gray-400">/cord</span></span>
+                      <span className="text-2xl font-bold text-blue-600">
+                        ${parseFloat(p.price_per_unit).toFixed(0)}
+                        <span className="text-sm font-normal text-gray-400">/{p.unit || 'cord'}</span>
+                      </span>
                       <span className="text-sm text-gray-500">{p.quantity} left</span>
                     </div>
-                    <p className="text-xs text-gray-400 mt-1">{p.first_name} {p.last_name}</p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {p.verified && <span className="text-blue-500 mr-1">✓</span>}
+                      {p.business_name || `${p.first_name} ${p.last_name}`}
+                    </p>
                     <div className="flex gap-1 mt-2 flex-wrap">
                       {p.pickup_available && (
-                        <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full">📍 Pickup available</span>
+                        <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full">📍 Pickup</span>
                       )}
                       <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">🚚 Delivery</span>
+                      {p.seasoning_status && SEASONING_BADGES[p.seasoning_status] && (
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${SEASONING_BADGES[p.seasoning_status].color}`}>
+                          {SEASONING_BADGES[p.seasoning_status].label}
+                        </span>
+                      )}
+                      {p.certification && (
+                        <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full">{p.certification}</span>
+                      )}
+                      {p.is_wholesale && (
+                        <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">Wholesale</span>
+                      )}
                     </div>
                     <button onClick={() => openOrderModal(p)}
                       className="mt-4 w-full py-2 bg-green-600 text-white rounded-lg font-medium text-sm hover:bg-green-700">

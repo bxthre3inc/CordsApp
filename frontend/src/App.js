@@ -9,6 +9,7 @@ import DeliveryDashboard from './pages/DeliveryDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import GuestDemo from './pages/GuestDemo';
 import EnterprisePage from './pages/EnterprisePage';
+import MarketIndex from './pages/MarketIndex';
 import './App.css';
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
@@ -44,6 +45,7 @@ function App() {
           <Route path="/register" element={<Register />} />
           <Route path="/demo" element={<GuestDemo />} />
           <Route path="/enterprise" element={<EnterprisePage />} />
+          <Route path="/market" element={<MarketIndex />} />
           <Route
             path="/dashboard"
             element={
