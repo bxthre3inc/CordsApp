@@ -35,19 +35,58 @@ class PaymentController {
       // For others: commission is deducted from supplier payout (handled post-payment)
       const buyerAmount = Math.round(parseFloat(order.total_price) * 100);
 
-      const lineItems = [{
-        price_data: {
-          currency: 'usd',
-          product_data: {
-            name: `${order.wood_type} — ${order.quantity} ${order.unit || 'cords'}`,
-            description: order.delivery_type === 'pickup'
-              ? 'Pickup at supplier location'
-              : `${order.delivery_type} delivery`
+      const isPickup = order.delivery_type === 'pickup';
+      const deliveryFeeAmount = isPickup ? 0 : order.delivery_type === 'express' ? 4500 : 2500;
+      const stackingFeeAmount = Math.round(parseFloat(order.stacking_fee || 0) * 100);
+      const woodAmount = Math.round(parseFloat(order.total_price) * 100);
+      const buyerProcessingFee = Math.round(parseFloat(order.buyer_processing_fee || 0) * 100);
+
+      const lineItems = [
+        {
+          price_data: {
+            currency: 'usd',
+            product_data: {
+              name: `${order.wood_type} — ${order.quantity} ${order.unit || 'cords'}`,
+              description: isPickup ? 'Pickup at supplier location' : `${order.delivery_type} delivery`
+            },
+            unit_amount: woodAmount
           },
-          unit_amount: buyerAmount
-        },
-        quantity: 1
-      }];
+          quantity: 1
+        }
+      ];
+
+      if (stackingFeeAmount > 0) {
+        lineItems.push({
+          price_data: {
+            currency: 'usd',
+            product_data: { name: 'Hand stacking service', description: `${order.quantity} cord(s) × $15` },
+            unit_amount: stackingFeeAmount
+          },
+          quantity: 1
+        });
+      }
+
+      if (deliveryFeeAmount > 0) {
+        lineItems.push({
+          price_data: {
+            currency: 'usd',
+            product_data: { name: `${order.delivery_type === 'express' ? 'Express' : 'Standard'} delivery` },
+            unit_amount: deliveryFeeAmount
+          },
+          quantity: 1
+        });
+      }
+
+      if (buyerProcessingFee > 0) {
+        lineItems.push({
+          price_data: {
+            currency: 'usd',
+            product_data: { name: 'Payment processing fee (2%)', description: 'Covers card processing costs' },
+            unit_amount: buyerProcessingFee
+          },
+          quantity: 1
+        });
+      }
 
       const session = await stripe.checkout.sessions.create({
         payment_method_types: ['card'],
@@ -60,7 +99,8 @@ class PaymentController {
           buyerId: String(order.buyer_id),
           supplierId: String(order.supplier_id),
           accountType,
-          commissionRate: String(commission)
+          commissionRate: String(commission),
+          sellerProcessingFee: String(order.seller_processing_fee || 0)
         }
       });
 
@@ -151,18 +191,30 @@ class PaymentController {
       switch (event.type) {
         case 'checkout.session.completed': {
           const session = event.data.object;
-          const { orderId, supplierId, commissionRate, accountType } = session.metadata;
+          const { orderId, supplierId, commissionRate, accountType, sellerProcessingFee } = session.metadata;
           const amountTotal = session.amount_total / 100;
           const stripeFee = amountTotal * 0.029 + 0.30;
           const commission = accountType === 'enterprise' ? 0 : amountTotal * parseFloat(commissionRate || 0);
-          const supplierPayout = amountTotal - commission - stripeFee;
+          const sellerFee = parseFloat(sellerProcessingFee || 0);
+          const supplierPayout = amountTotal - commission - stripeFee - sellerFee;
 
           await pool.query(
             'UPDATE orders SET payment_status = $1, updated_at = NOW() WHERE id = $2',
             ['completed', orderId]
           );
 
-          console.log(`Order ${orderId} paid. GMV: $${amountTotal}, Stripe: $${stripeFee.toFixed(2)}, Commission: $${commission.toFixed(2)}, Supplier payout: $${supplierPayout.toFixed(2)}`);
+          // Processing fee math:
+          // Buyer paid 2% on top → collected for processing
+          // Seller owes 2% → deducted from payout
+          // Together covers Stripe's 2.9% + $0.30 and nets a small margin
+          console.log([
+            `Order ${orderId} settled.`,
+            `Buyer charged: $${amountTotal.toFixed(2)}`,
+            `Stripe fee: $${stripeFee.toFixed(2)}`,
+            `Commission: $${commission.toFixed(2)}`,
+            `Seller processing fee: $${sellerFee.toFixed(2)}`,
+            `Supplier payout: $${supplierPayout.toFixed(2)}`
+          ].join(' | '));
           break;
         }
         case 'customer.subscription.updated':

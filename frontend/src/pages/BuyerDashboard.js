@@ -3,7 +3,10 @@ import { productService, orderService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import DeliveryLocationPicker from '../components/DeliveryLocationPicker';
 
-const STACKING_FEE_PER_CORD = 15.00; // must match backend constant
+const STACKING_FEE_PER_CORD  = 15.00;  // must match backend constant
+const PROCESSING_FEE_RATE    = 0.02;   // 2% — must match backend constant
+const DELIVERY_FEE_STANDARD  = 25.00;
+const DELIVERY_FEE_EXPRESS   = 45.00;
 
 const woodTypes = ['Oak', 'Maple', 'Pine', 'Cherry', 'Walnut', 'Birch', 'Ash', 'Cedar'];
 
@@ -29,6 +32,7 @@ export default function BuyerDashboard() {
     quantity: 1,
     fulfillmentType: 'delivery',
     deliveryType: 'standard',
+    wantStacking: false,
     deliveryLocation: null,
     gateCode: '',
     deliveryNotes: '',
@@ -79,6 +83,7 @@ export default function BuyerDashboard() {
       quantity: 1,
       fulfillmentType: 'delivery',
       deliveryType: 'standard',
+      wantStacking: false,
       deliveryLocation: savedLocation,
       gateCode: '',
       deliveryNotes: '',
@@ -100,6 +105,7 @@ export default function BuyerDashboard() {
         deliveryDate: null,
         paymentMethod: 'card',
         deliveryType: isPickup ? 'pickup' : orderForm.deliveryType,
+        wantStacking: !isPickup && orderForm.wantStacking,
         gateCode: orderForm.gateCode || null,
         deliveryNotes: orderForm.deliveryNotes || null,
       });
@@ -112,10 +118,12 @@ export default function BuyerDashboard() {
   };
 
   const isPickup = orderForm.fulfillmentType === 'pickup';
-  const woodCost = orderModal ? parseFloat(orderModal.price_per_unit) * orderForm.quantity : 0;
-  const stackingFee = isPickup ? 0 : orderForm.quantity * STACKING_FEE_PER_CORD;
-  const deliveryFee = isPickup ? 0 : (orderForm.deliveryType === 'express' ? 45 : 25);
-  const totalCost = woodCost + stackingFee + deliveryFee;
+  const woodCost    = orderModal ? parseFloat(orderModal.price_per_unit) * orderForm.quantity : 0;
+  const stackingFee = (!isPickup && orderForm.wantStacking) ? orderForm.quantity * STACKING_FEE_PER_CORD : 0;
+  const deliveryFee = isPickup ? 0 : orderForm.deliveryType === 'express' ? DELIVERY_FEE_EXPRESS : DELIVERY_FEE_STANDARD;
+  const subtotal    = woodCost + stackingFee + deliveryFee;
+  const processingFee = parseFloat((subtotal * PROCESSING_FEE_RATE).toFixed(2));
+  const totalCost   = subtotal + processingFee;
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -303,12 +311,26 @@ export default function BuyerDashboard() {
                     </div>
                   </div>
 
-                  {/* Stacking notice — required */}
-                  <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-3">
-                    <span className="text-xl mt-0.5">🪵</span>
+                  {/* Stacking — optional add-on */}
+                  <div
+                    onClick={() => setOrderForm(f => ({ ...f, wantStacking: !f.wantStacking }))}
+                    className={`flex items-start gap-3 rounded-xl p-3 border-2 cursor-pointer transition-all ${
+                      orderForm.wantStacking
+                        ? 'border-amber-400 bg-amber-50'
+                        : 'border-gray-200 bg-white hover:border-amber-200'
+                    }`}
+                  >
+                    <div className={`mt-0.5 w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center ${orderForm.wantStacking ? 'bg-amber-500 border-amber-500' : 'border-gray-300'}`}>
+                      {orderForm.wantStacking && <span className="text-white text-xs font-bold">✓</span>}
+                    </div>
                     <div>
-                      <p className="text-sm font-semibold text-amber-900">Hand stacking included — ${STACKING_FEE_PER_CORD}/cord</p>
-                      <p className="text-xs text-amber-700 mt-0.5">All Cords drivers hand-stack your delivery. Let them know exactly where in the notes below.</p>
+                      <p className="text-sm font-semibold text-gray-900">
+                        Add hand stacking — ${STACKING_FEE_PER_CORD}/cord
+                        {orderForm.wantStacking && <span className="ml-2 text-amber-600">+${stackingFee.toFixed(2)}</span>}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Driver stacks your wood exactly where you want it. All Cords drivers are trained for this. Great for locations trucks can't reach.
+                      </p>
                     </div>
                   </div>
 
@@ -370,25 +392,26 @@ export default function BuyerDashboard() {
                   <span className="text-gray-600">{orderModal.wood_type} × {orderForm.quantity} cord{orderForm.quantity !== 1 ? 's' : ''}</span>
                   <span className="font-medium">${woodCost.toFixed(2)}</span>
                 </div>
-                {!isPickup && (
-                  <>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Hand stacking ({orderForm.quantity} cord{orderForm.quantity !== 1 ? 's' : ''} × ${STACKING_FEE_PER_CORD})</span>
-                      <span className="font-medium">${stackingFee.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">{orderForm.deliveryType === 'express' ? 'Express' : 'Standard'} delivery</span>
-                      <span className="font-medium">${deliveryFee.toFixed(2)}</span>
-                    </div>
-                  </>
+                {!isPickup && stackingFee > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Hand stacking × {orderForm.quantity} cord{orderForm.quantity !== 1 ? 's' : ''}</span>
+                    <span className="font-medium">${stackingFee.toFixed(2)}</span>
+                  </div>
                 )}
-                <div className="flex justify-between font-bold text-base pt-2 border-t border-gray-200">
+                {!isPickup && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">{orderForm.deliveryType === 'express' ? 'Express' : 'Standard'} delivery</span>
+                    <span className="font-medium">${deliveryFee.toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm text-gray-500 pt-1 border-t border-gray-200">
+                  <span>Payment processing fee (2%)</span>
+                  <span>${processingFee.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between font-bold text-base pt-1 border-t border-gray-200">
                   <span>Total</span>
                   <span className="text-blue-600">${totalCost.toFixed(2)}</span>
                 </div>
-                {!isPickup && (
-                  <p className="text-xs text-gray-400">Card processing fee (2.9% + $0.30) applied at checkout</p>
-                )}
               </div>
             </div>
 

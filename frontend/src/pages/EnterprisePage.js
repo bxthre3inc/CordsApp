@@ -22,7 +22,7 @@ const TIERS = [
     monthly: '$299',
     perCord: '$3.00/cord',
     example: '100 cords → $599/mo to Cords',
-    stripe: 'You pay Stripe fees (~2.9% + $0.30)',
+    stripe: '2% processing fee each way (buyer + seller)',
     color: 'border-gray-200',
     badge: '',
   },
@@ -32,7 +32,7 @@ const TIERS = [
     monthly: '$699',
     perCord: '$2.50/cord',
     example: '300 cords → $1,449/mo to Cords',
-    stripe: 'You pay Stripe fees (~2.9% + $0.30)',
+    stripe: '2% processing fee each way (buyer + seller)',
     color: 'border-blue-500',
     badge: 'Most Popular',
   },
@@ -42,7 +42,7 @@ const TIERS = [
     monthly: 'From $999',
     perCord: 'From $2.00/cord',
     example: '700 cords → $2,399+/mo to Cords',
-    stripe: 'You pay Stripe fees (~2.9% + $0.30)',
+    stripe: '2% processing fee each way (buyer + seller)',
     color: 'border-gray-200',
     badge: '',
   },
@@ -51,7 +51,8 @@ const TIERS = [
 const COMPARISON = [
   { feature: 'Platform commission', free: '20%', starter: '10%', pro: '5%', enterprise: '0%' },
   { feature: 'Monthly fee', free: '$0', starter: '$29.99', pro: '$99.99', enterprise: 'Custom flat rate' },
-  { feature: 'Card processing', free: 'Cords absorbs', starter: 'Cords absorbs', pro: 'Cords absorbs', enterprise: 'You pay (passed through)' },
+  { feature: 'Processing fee (buyer)', free: '2%', starter: '2%', pro: '2%', enterprise: '2%' },
+  { feature: 'Processing fee (seller)', free: '2%', starter: '2%', pro: '2%', enterprise: '2%' },
   { feature: 'Per-mile delivery cut', free: 'N/A', starter: 'N/A', pro: 'N/A', enterprise: 'Negotiated' },
   { feature: 'Pickup option', free: 'No', starter: 'Yes', pro: 'Yes', enterprise: 'Yes' },
   { feature: 'Active listings', free: 'Up to 5', starter: 'Unlimited', pro: 'Unlimited', enterprise: 'Unlimited' },
@@ -167,7 +168,7 @@ export default function EnterprisePage() {
                 <span className="font-medium">$1.25–$2.50/mile</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">Cords cut (negotiated)</span>
+                <span className="text-gray-500">Cords cut (negotiated + 2% processing)</span>
                 <span className="font-medium">$0.25–$0.50/mile</span>
               </div>
               <div className="flex justify-between">

@@ -1,55 +1,63 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
-// Lazy-load mapbox to avoid crashing when token is missing
-let MapComponent = null;
-let MarkerComponent = null;
+// Leaflet's default icons break in webpack — patch them
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconUrl: require('leaflet/dist/images/marker-icon.png'),
+  iconRetinaUrl: require('leaflet/dist/images/marker-icon-2x.png'),
+  shadowUrl: require('leaflet/dist/images/marker-shadow.png'),
+});
 
-try {
-  const mapboxMod = require('react-map-gl');
-  MapComponent = mapboxMod.default || mapboxMod.Map;
-  MarkerComponent = mapboxMod.Marker;
-  require('mapbox-gl/dist/mapbox-gl.css');
-} catch (_) {
-  // mapbox-gl not available
+const US_CENTER = [39.8283, -98.5795];
+
+// Flies the map to a new center when initialLocation changes
+function MapFly({ center, zoom }) {
+  const map = useMap();
+  useEffect(() => {
+    map.flyTo(center, zoom, { duration: 0.8 });
+  }, [center, zoom, map]);
+  return null;
 }
 
-const MAPBOX_TOKEN = process.env.REACT_APP_MAPBOX_TOKEN;
+function DraggableMarker({ position, onDragEnd }) {
+  const markerRef = useRef(null);
 
-// Default center: geographic center of continental US (fallback only)
-const DEFAULT_CENTER = { longitude: -98.5795, latitude: 39.8283, zoom: 4 };
+  return (
+    <Marker
+      position={position}
+      draggable
+      ref={markerRef}
+      eventHandlers={{
+        dragend() {
+          const m = markerRef.current;
+          if (m) {
+            const { lat, lng } = m.getLatLng();
+            onDragEnd({ latitude: lat, longitude: lng });
+          }
+        },
+      }}
+    />
+  );
+}
 
 export default function DeliveryLocationPicker({ initialLocation, onChange }) {
-  const hasLocation = initialLocation?.latitude && initialLocation?.longitude;
+  const hasLocation =
+    initialLocation?.latitude != null && initialLocation?.longitude != null;
 
-  const [markerPos, setMarkerPos] = useState({
-    longitude: hasLocation ? parseFloat(initialLocation.longitude) : DEFAULT_CENTER.longitude,
-    latitude: hasLocation ? parseFloat(initialLocation.latitude) : DEFAULT_CENTER.latitude,
-  });
+  const startPos = hasLocation
+    ? [parseFloat(initialLocation.latitude), parseFloat(initialLocation.longitude)]
+    : US_CENTER;
 
-  const [viewState, setViewState] = useState({
-    longitude: hasLocation ? parseFloat(initialLocation.longitude) : DEFAULT_CENTER.longitude,
-    latitude: hasLocation ? parseFloat(initialLocation.latitude) : DEFAULT_CENTER.latitude,
-    zoom: hasLocation ? 16 : DEFAULT_CENTER.zoom,
-  });
+  const [markerPos, setMarkerPos] = useState(startPos);
+  const zoom = hasLocation ? 16 : 4;
 
-  const onDragEnd = useCallback((event) => {
-    const { lng, lat } = event.lngLat;
-    const pos = { longitude: lng, latitude: lat };
-    setMarkerPos(pos);
+  const handleDragEnd = (pos) => {
+    setMarkerPos([pos.latitude, pos.longitude]);
     onChange(pos);
-  }, [onChange]);
-
-  if (!MAPBOX_TOKEN || !MapComponent) {
-    return (
-      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm">
-        <p className="font-semibold text-amber-800 mb-1">Map unavailable</p>
-        <p className="text-amber-700 text-xs">Add <code className="bg-amber-100 px-1 rounded">REACT_APP_MAPBOX_TOKEN</code> to enable the interactive delivery pin map.</p>
-        {hasLocation && (
-          <p className="text-amber-600 text-xs mt-2">Using your saved address for delivery coordinates.</p>
-        )}
-      </div>
-    );
-  }
+  };
 
   return (
     <div>
@@ -57,31 +65,22 @@ export default function DeliveryLocationPicker({ initialLocation, onChange }) {
         className="rounded-xl overflow-hidden border border-gray-200 shadow-sm"
         style={{ height: 260 }}
       >
-        <MapComponent
-          {...viewState}
-          onMove={e => setViewState(e.viewState)}
-          mapboxAccessToken={MAPBOX_TOKEN}
-          mapStyle="mapbox://styles/mapbox/streets-v12"
-          style={{ width: '100%', height: '100%' }}
+        <MapContainer
+          center={startPos}
+          zoom={zoom}
+          style={{ height: '100%', width: '100%' }}
+          scrollWheelZoom={false}
         >
-          <MarkerComponent
-            longitude={markerPos.longitude}
-            latitude={markerPos.latitude}
-            draggable
-            onDragEnd={onDragEnd}
-            anchor="bottom"
-          >
-            <div
-              style={{ fontSize: 36, lineHeight: 1, cursor: 'grab', userSelect: 'none' }}
-              title="Drag to your exact stacking location"
-            >
-              📍
-            </div>
-          </MarkerComponent>
-        </MapComponent>
+          <TileLayer
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors'
+          />
+          <MapFly center={markerPos} zoom={zoom} />
+          <DraggableMarker position={markerPos} onDragEnd={handleDragEnd} />
+        </MapContainer>
       </div>
       <p className="text-xs text-gray-400 mt-1.5 text-center">
-        Drag the pin to your <strong>exact stacking location</strong>
+        Drag the pin to your <strong>exact stacking location</strong> · Map data © OpenStreetMap
       </p>
     </div>
   );
