@@ -3,7 +3,7 @@
 
 const PLATFORM_DELIVERY_RATE = 0.20;   // 20% to platform, 80% to driver
 const EXPRESS_MULTIPLIER     = 1.50;   // express = 1.5× the standard per-mile rate
-const MIN_DELIVERY_FEE       = 10.00;  // floor — keeps short trips worthwhile
+const BASE_DELIVERY_FEE      = 10.00;  // flat charge on every delivery, regardless of distance
 
 // Per-mile rate the buyer pays, tiered by number of cords being delivered.
 // Higher quantity = larger vehicle needed but lower per-cord overhead.
@@ -31,15 +31,15 @@ function haversineMiles(a, b) {
   return R * 2 * Math.asin(Math.sqrt(h));
 }
 
-// Returns { miles, ratePerMile, baseFee, deliveryFee } where deliveryFee is what
-// the buyer pays (after express multiplier and minimum floor applied).
+// Returns { miles, ratePerMile, baseFee, mileageFee, deliveryFee }.
+// deliveryFee = BASE_DELIVERY_FEE + (miles × ratePerMile × multiplier)
 function calcDeliveryFee(supplierLocation, buyerLocation, quantity, isExpress = false) {
   const miles       = haversineMiles(supplierLocation, buyerLocation);
   const ratePerMile = getRatePerMile(quantity);
   const multiplier  = isExpress ? EXPRESS_MULTIPLIER : 1;
-  const raw         = miles * ratePerMile * multiplier;
-  const deliveryFee = parseFloat(Math.max(raw, MIN_DELIVERY_FEE).toFixed(2));
-  return { miles: parseFloat(miles.toFixed(1)), ratePerMile, deliveryFee };
+  const mileageFee  = parseFloat((miles * ratePerMile * multiplier).toFixed(2));
+  const deliveryFee = parseFloat((BASE_DELIVERY_FEE + mileageFee).toFixed(2));
+  return { miles: parseFloat(miles.toFixed(1)), ratePerMile, baseFee: BASE_DELIVERY_FEE, mileageFee, deliveryFee };
 }
 
-module.exports = { PLATFORM_DELIVERY_RATE, EXPRESS_MULTIPLIER, MIN_DELIVERY_FEE, RATE_TIERS, getRatePerMile, haversineMiles, calcDeliveryFee };
+module.exports = { PLATFORM_DELIVERY_RATE, EXPRESS_MULTIPLIER, BASE_DELIVERY_FEE, RATE_TIERS, getRatePerMile, haversineMiles, calcDeliveryFee };

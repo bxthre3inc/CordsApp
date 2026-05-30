@@ -6,7 +6,7 @@ import DeliveryLocationPicker from '../components/DeliveryLocationPicker';
 const STACKING_FEE_PER_CORD  = 15.00;
 const PROCESSING_FEE_RATE    = 0.02;
 const EXPRESS_MULTIPLIER     = 1.50;
-const MIN_DELIVERY_FEE       = 10.00;
+const BASE_DELIVERY_FEE      = 10.00;  // flat charge on every delivery
 const RATE_TIERS = [
   { maxQuantity: 1,        ratePerMile: 3.50 },
   { maxQuantity: 3,        ratePerMile: 3.00 },
@@ -31,12 +31,13 @@ function haversineMiles(a, b) {
 }
 
 function calcDeliveryFee(supplierLocation, buyerLocation, quantity, isExpress) {
-  if (!supplierLocation || !buyerLocation) return { miles: 0, ratePerMile: 0, deliveryFee: MIN_DELIVERY_FEE };
+  if (!supplierLocation || !buyerLocation) return { miles: 0, ratePerMile: 0, baseFee: BASE_DELIVERY_FEE, mileageFee: 0, deliveryFee: BASE_DELIVERY_FEE };
   const miles = haversineMiles(supplierLocation, buyerLocation);
   const ratePerMile = getRatePerMile(quantity);
   const multiplier = isExpress ? EXPRESS_MULTIPLIER : 1;
-  const deliveryFee = parseFloat(Math.max(miles * ratePerMile * multiplier, MIN_DELIVERY_FEE).toFixed(2));
-  return { miles: parseFloat(miles.toFixed(1)), ratePerMile, deliveryFee };
+  const mileageFee = parseFloat((miles * ratePerMile * multiplier).toFixed(2));
+  const deliveryFee = parseFloat((BASE_DELIVERY_FEE + mileageFee).toFixed(2));
+  return { miles: parseFloat(miles.toFixed(1)), ratePerMile, baseFee: BASE_DELIVERY_FEE, mileageFee, deliveryFee };
 }
 
 const woodTypes = ['Oak', 'Maple', 'Pine', 'Cherry', 'Walnut', 'Birch', 'Ash', 'Cedar'];
@@ -590,17 +591,22 @@ export default function BuyerDashboard() {
                   </div>
                 )}
                 {!isPickup && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">
-                      {orderForm.deliveryType === 'express' ? 'Express' : 'Standard'} delivery
-                      {deliveryCalc.miles > 0 && (
-                        <span className="ml-1 text-gray-400 text-xs">
-                          ({deliveryCalc.miles} mi × ${deliveryCalc.ratePerMile.toFixed(2)}/mi{orderForm.deliveryType === 'express' ? ' × 1.5' : ''})
-                        </span>
-                      )}
-                    </span>
-                    <span className="font-medium">${deliveryFee.toFixed(2)}</span>
-                  </div>
+                  <>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Delivery base fee</span>
+                      <span className="font-medium">${BASE_DELIVERY_FEE.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">
+                        Mileage{deliveryCalc.miles > 0 && (
+                          <span className="ml-1 text-gray-400 text-xs">
+                            ({deliveryCalc.miles} mi × ${deliveryCalc.ratePerMile.toFixed(2)}/mi{orderForm.deliveryType === 'express' ? ' × 1.5' : ''})
+                          </span>
+                        )}
+                      </span>
+                      <span className="font-medium">${(deliveryCalc.mileageFee || 0).toFixed(2)}</span>
+                    </div>
+                  </>
                 )}
                 <div className="flex justify-between text-sm text-gray-500 pt-1 border-t border-gray-200">
                   <span>Payment processing fee (2%)</span>
