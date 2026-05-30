@@ -3,10 +3,41 @@ import { productService, orderService, paymentService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import DeliveryLocationPicker from '../components/DeliveryLocationPicker';
 
-const STACKING_FEE_PER_CORD  = 15.00;  // must match backend constant
-const PROCESSING_FEE_RATE    = 0.02;   // 2% — must match backend constant
-const DELIVERY_FEE_STANDARD  = 25.00;
-const DELIVERY_FEE_EXPRESS   = 45.00;
+const STACKING_FEE_PER_CORD  = 15.00;
+const PROCESSING_FEE_RATE    = 0.02;
+const EXPRESS_MULTIPLIER     = 1.50;
+const MIN_DELIVERY_FEE       = 15.00;
+const RATE_TIERS = [
+  { maxQuantity: 1,        ratePerMile: 3.50 },
+  { maxQuantity: 3,        ratePerMile: 3.00 },
+  { maxQuantity: 6,        ratePerMile: 2.50 },
+  { maxQuantity: 10,       ratePerMile: 2.00 },
+  { maxQuantity: Infinity, ratePerMile: 1.75 },
+];
+
+function getRatePerMile(qty) {
+  return (RATE_TIERS.find(t => qty <= t.maxQuantity) || RATE_TIERS[RATE_TIERS.length - 1]).ratePerMile;
+}
+
+function haversineMiles(a, b) {
+  if (!a || !b) return 0;
+  const R = 3958.8;
+  const toRad = d => (d * Math.PI) / 180;
+  const dLat = toRad(b.latitude  - a.latitude);
+  const dLon = toRad(b.longitude - a.longitude);
+  const h = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(a.latitude)) * Math.cos(toRad(b.latitude)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.asin(Math.sqrt(h));
+}
+
+function calcDeliveryFee(supplierLocation, buyerLocation, quantity, isExpress) {
+  if (!supplierLocation || !buyerLocation) return { miles: 0, ratePerMile: 0, deliveryFee: MIN_DELIVERY_FEE };
+  const miles = haversineMiles(supplierLocation, buyerLocation);
+  const ratePerMile = getRatePerMile(quantity);
+  const multiplier = isExpress ? EXPRESS_MULTIPLIER : 1;
+  const deliveryFee = parseFloat(Math.max(miles * ratePerMile * multiplier, MIN_DELIVERY_FEE).toFixed(2));
+  return { miles: parseFloat(miles.toFixed(1)), ratePerMile, deliveryFee };
+}
 
 const woodTypes = ['Oak', 'Maple', 'Pine', 'Cherry', 'Walnut', 'Birch', 'Ash', 'Cedar'];
 
@@ -111,10 +142,10 @@ function BuyerOrderDetailModal({ order, onClose, onPay }) {
                 <span>${parseFloat(order.stacking_fee).toFixed(2)}</span>
               </div>
             )}
-            {!isPickup && (
+            {!isPickup && parseFloat(order.delivery_fee || 0) > 0 && (
               <div className="flex justify-between">
                 <span className="text-gray-500">{order.delivery_type === 'express' ? 'Express' : 'Standard'} delivery</span>
-                <span>${order.delivery_type === 'express' ? '45.00' : '25.00'}</span>
+                <span>${parseFloat(order.delivery_fee).toFixed(2)}</span>
               </div>
             )}
             {order.buyer_processing_fee > 0 && (
@@ -248,12 +279,19 @@ export default function BuyerDashboard() {
   };
 
   const isPickup = orderForm.fulfillmentType === 'pickup';
-  const woodCost    = orderModal ? parseFloat(orderModal.price_per_unit) * orderForm.quantity : 0;
+  const woodCost  = orderModal ? parseFloat(orderModal.price_per_unit) * orderForm.quantity : 0;
   const stackingFee = (!isPickup && orderForm.wantStacking) ? orderForm.quantity * STACKING_FEE_PER_CORD : 0;
-  const deliveryFee = isPickup ? 0 : orderForm.deliveryType === 'express' ? DELIVERY_FEE_EXPRESS : DELIVERY_FEE_STANDARD;
-  const subtotal    = woodCost + stackingFee + deliveryFee;
+
+  // Live delivery fee — calculated client-side using same formula as backend
+  const supplierLoc = orderModal?.location;  // product.location from nearby search
+  const deliveryCalc = (!isPickup && orderModal)
+    ? calcDeliveryFee(supplierLoc, orderForm.deliveryLocation, orderForm.quantity, orderForm.deliveryType === 'express')
+    : { miles: 0, ratePerMile: 0, deliveryFee: 0 };
+  const deliveryFee = isPickup ? 0 : deliveryCalc.deliveryFee;
+
+  const subtotal      = woodCost + stackingFee + deliveryFee;
   const processingFee = parseFloat((subtotal * PROCESSING_FEE_RATE).toFixed(2));
-  const totalCost   = subtotal + processingFee;
+  const totalCost     = subtotal + processingFee;
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -446,8 +484,8 @@ export default function BuyerDashboard() {
                     <label className="block text-sm font-medium text-gray-700 mb-2">Delivery speed</label>
                     <div className="grid grid-cols-2 gap-2">
                       {[
-                        { key: 'standard', label: 'Standard', sub: '2–3 days · +$25' },
-                        { key: 'express', label: 'Express', sub: 'Next day · +$45' },
+                        { key: 'standard', label: 'Standard', sub: '2–3 days' },
+                        { key: 'express', label: 'Express', sub: `Next day · 1.5× rate` },
                       ].map(d => (
                         <button key={d.key} onClick={() => setOrderForm(f => ({ ...f, deliveryType: d.key }))}
                           className={`py-2.5 px-3 rounded-xl text-sm text-left border-2 transition-all ${orderForm.deliveryType === d.key ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}>
@@ -456,6 +494,12 @@ export default function BuyerDashboard() {
                         </button>
                       ))}
                     </div>
+                    {deliveryCalc.miles > 0 && (
+                      <p className="text-xs text-gray-400 mt-1.5">
+                        ~{deliveryCalc.miles} mi · ${deliveryCalc.ratePerMile.toFixed(2)}/mi
+                        {orderForm.deliveryType === 'express' ? ` × 1.5 (express)` : ''}
+                      </p>
+                    )}
                   </div>
 
                   {/* Stacking — optional add-on */}
@@ -484,8 +528,8 @@ export default function BuyerDashboard() {
                   {/* Map */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Stacking location
-                      <span className="ml-1 text-xs text-gray-400 font-normal">— drag pin to exact spot</span>
+                      Delivery location
+                      <span className="ml-1 text-xs text-gray-400 font-normal">— drag pin to exact spot · fee updates live</span>
                     </label>
                     <DeliveryLocationPicker
                       initialLocation={user?.location || location}
@@ -547,7 +591,14 @@ export default function BuyerDashboard() {
                 )}
                 {!isPickup && (
                   <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">{orderForm.deliveryType === 'express' ? 'Express' : 'Standard'} delivery</span>
+                    <span className="text-gray-600">
+                      {orderForm.deliveryType === 'express' ? 'Express' : 'Standard'} delivery
+                      {deliveryCalc.miles > 0 && (
+                        <span className="ml-1 text-gray-400 text-xs">
+                          ({deliveryCalc.miles} mi × ${deliveryCalc.ratePerMile.toFixed(2)}/mi{orderForm.deliveryType === 'express' ? ' × 1.5' : ''})
+                        </span>
+                      )}
+                    </span>
                     <span className="font-medium">${deliveryFee.toFixed(2)}</span>
                   </div>
                 )}

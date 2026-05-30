@@ -2,12 +2,10 @@ const Order = require('../models/Order');
 const Product = require('../models/Product');
 const pool = require('../config/database');
 const emailService = require('../services/EmailService');
+const { calcDeliveryFee, PLATFORM_DELIVERY_RATE } = require('../utils/delivery');
 
 const STACKING_FEE_PER_CORD = 15.00;
-const DELIVERY_FEE_STANDARD  = 25.00;
-const DELIVERY_FEE_EXPRESS   = 45.00;
-const PROCESSING_FEE_RATE    = 0.02;   // 2% charged to buyer, 2% deducted from seller
-const PLATFORM_DELIVERY_RATE = 0.20;   // platform keeps 20% of delivery fee; driver keeps 80%
+const PROCESSING_FEE_RATE   = 0.02;   // 2% charged to buyer, 2% deducted from seller
 
 class OrderController {
   static async create(req, res) {
@@ -23,10 +21,25 @@ class OrderController {
 
       const isPickup = deliveryType === 'pickup';
       const woodCost    = parseFloat(product.price_per_unit) * quantity;
-      // Stacking is optional — buyer opts in; all delivery drivers are capable
       const stackingFee = (!isPickup && wantStacking) ? quantity * STACKING_FEE_PER_CORD : 0;
-      const deliveryFee = isPickup ? 0
-        : deliveryType === 'express' ? DELIVERY_FEE_EXPRESS : DELIVERY_FEE_STANDARD;
+
+      let deliveryFee = 0;
+      let deliveryMiles = 0;
+      let deliveryRatePerMile = 0;
+      if (!isPickup) {
+        if (!deliveryLocation?.latitude || !deliveryLocation?.longitude) {
+          return res.status(400).json({ error: 'Delivery location coordinates are required for delivery orders' });
+        }
+        const supplierLoc = product.location;
+        if (!supplierLoc?.latitude || !supplierLoc?.longitude) {
+          return res.status(400).json({ error: 'Supplier location not set — cannot calculate delivery fee' });
+        }
+        const isExpress = deliveryType === 'express';
+        const calc = calcDeliveryFee(supplierLoc, deliveryLocation, quantity, isExpress);
+        deliveryFee         = calc.deliveryFee;
+        deliveryMiles       = calc.miles;
+        deliveryRatePerMile = calc.ratePerMile;
+      }
 
       // Commission applies to wood + stacking combined (platform earns on both)
       // Processing fee (2% each side) applies to the full buyer-facing subtotal
@@ -75,6 +88,8 @@ class OrderController {
           woodCost,
           stackingFee,
           deliveryFee,
+          deliveryMiles,
+          deliveryRatePerMile,
           platformDeliveryFee: parseFloat((deliveryFee * PLATFORM_DELIVERY_RATE).toFixed(2)),
           driverDeliveryPayout: parseFloat((deliveryFee * (1 - PLATFORM_DELIVERY_RATE)).toFixed(2)),
           commissionableBasis,
@@ -87,6 +102,33 @@ class OrderController {
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Failed to create order' });
+    }
+  }
+
+  // GET /orders/delivery-estimate?productId=&quantity=&lat=&lng=&express=
+  // Returns delivery fee preview before order placement.
+  static async deliveryEstimate(req, res) {
+    try {
+      const { productId, quantity, lat, lng, express } = req.query;
+      if (!productId || !quantity || !lat || !lng) {
+        return res.status(400).json({ error: 'productId, quantity, lat, and lng are required' });
+      }
+      const product = await Product.findById(productId);
+      if (!product) return res.status(404).json({ error: 'Product not found' });
+      if (!product.location?.latitude || !product.location?.longitude) {
+        return res.status(400).json({ error: 'Supplier location not set' });
+      }
+      const { calcDeliveryFee } = require('../utils/delivery');
+      const calc = calcDeliveryFee(
+        product.location,
+        { latitude: parseFloat(lat), longitude: parseFloat(lng) },
+        parseFloat(quantity),
+        express === 'true'
+      );
+      res.json(calc);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Failed to estimate delivery fee' });
     }
   }
 

@@ -55,7 +55,9 @@ export const orderService = {
   getSupplierOrders: () => apiClient.get('/orders/supplier/orders'),
   updateStatus: (id, status) => apiClient.put(`/orders/${id}/status`, { status }),
   assignDeliveryTeam: (id, deliveryTeamId) =>
-    apiClient.put(`/orders/${id}/assign-delivery`, { deliveryTeamId })
+    apiClient.put(`/orders/${id}/assign-delivery`, { deliveryTeamId }),
+  deliveryEstimate: (productId, quantity, lat, lng, express = false) =>
+    apiClient.get('/orders/delivery-estimate', { params: { productId, quantity, lat, lng, express } }),
 };
 
 export const paymentService = {

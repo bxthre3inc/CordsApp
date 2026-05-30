@@ -36,7 +36,8 @@ class PaymentController {
       const buyerAmount = Math.round(parseFloat(order.total_price) * 100);
 
       const isPickup = order.delivery_type === 'pickup';
-      const deliveryFeeAmount = isPickup ? 0 : order.delivery_type === 'express' ? 4500 : 2500;
+      // delivery_fee is stored on the order at creation (distance-based, from delivery.js)
+      const deliveryFeeAmount = Math.round(parseFloat(order.delivery_fee || 0) * 100);
       const stackingFeeAmount = Math.round(parseFloat(order.stacking_fee || 0) * 100);
       // order.total_price = wood + stacking (commissionable basis); wood line item is just wood
       const commissionableBasis = Math.round(parseFloat(order.total_price) * 100);
@@ -72,7 +73,10 @@ class PaymentController {
         lineItems.push({
           price_data: {
             currency: 'usd',
-            product_data: { name: `${order.delivery_type === 'express' ? 'Express' : 'Standard'} delivery` },
+            product_data: {
+              name: `${order.delivery_type === 'express' ? 'Express' : 'Standard'} delivery`,
+              description: `Distance-based rate per mile`
+            },
             unit_amount: deliveryFeeAmount
           },
           quantity: 1
