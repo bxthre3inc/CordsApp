@@ -6,7 +6,7 @@ import DeliveryLocationPicker from '../components/DeliveryLocationPicker';
 const STACKING_FEE_PER_CORD  = 15.00;
 const PROCESSING_FEE_RATE    = 0.02;
 const EXPRESS_MULTIPLIER     = 1.50;
-const MIN_DELIVERY_FEE       = 15.00;
+const MIN_DELIVERY_FEE       = 10.00;
 const RATE_TIERS = [
   { maxQuantity: 1,        ratePerMile: 3.50 },
   { maxQuantity: 3,        ratePerMile: 3.00 },

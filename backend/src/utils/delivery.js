@@ -3,7 +3,7 @@
 
 const PLATFORM_DELIVERY_RATE = 0.20;   // 20% to platform, 80% to driver
 const EXPRESS_MULTIPLIER     = 1.50;   // express = 1.5× the standard per-mile rate
-const MIN_DELIVERY_FEE       = 15.00;  // floor — keeps short trips worthwhile
+const MIN_DELIVERY_FEE       = 10.00;  // floor — keeps short trips worthwhile
 
 // Per-mile rate the buyer pays, tiered by number of cords being delivered.
 // Higher quantity = larger vehicle needed but lower per-cord overhead.
