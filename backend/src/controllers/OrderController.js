@@ -12,7 +12,7 @@ class OrderController {
       const { userId } = req.user;
       const {
         productId, quantity, deliveryLocation, deliveryDate,
-        paymentMethod, deliveryType, gateCode, deliveryNotes
+        paymentMethod, deliveryType, wantStacking = false, gateCode, deliveryNotes
       } = req.body;
 
       const product = await Product.findById(productId);
@@ -20,23 +20,26 @@ class OrderController {
 
       const isPickup = deliveryType === 'pickup';
       const woodCost    = parseFloat(product.price_per_unit) * quantity;
-      const stackingFee = isPickup ? 0 : quantity * STACKING_FEE_PER_CORD;
+      // Stacking is optional — buyer opts in; all delivery drivers are capable
+      const stackingFee = (!isPickup && wantStacking) ? quantity * STACKING_FEE_PER_CORD : 0;
       const deliveryFee = isPickup ? 0
         : deliveryType === 'express' ? DELIVERY_FEE_EXPRESS : DELIVERY_FEE_STANDARD;
 
-      // Buyer pays 2% on everything they're charged
-      const buyerSubtotal      = woodCost + stackingFee + deliveryFee;
-      const buyerProcessingFee = parseFloat((buyerSubtotal * PROCESSING_FEE_RATE).toFixed(2));
+      // Commission applies to wood + stacking combined (platform earns on both)
+      // Processing fee (2% each side) applies to the full buyer-facing subtotal
+      const commissionableBasis = woodCost + stackingFee;
+      const buyerSubtotal       = commissionableBasis + deliveryFee;
+      const buyerProcessingFee  = parseFloat((buyerSubtotal * PROCESSING_FEE_RATE).toFixed(2));
 
-      // Seller pays 2% on their wood revenue only
-      const sellerProcessingFee = parseFloat((woodCost * PROCESSING_FEE_RATE).toFixed(2));
+      // Seller processing fee on their commissionable revenue
+      const sellerProcessingFee = parseFloat((commissionableBasis * PROCESSING_FEE_RATE).toFixed(2));
 
       const order = await Order.create({
         buyerId: userId,
         supplierId: product.supplier_id,
         productId,
         quantity,
-        totalPrice: woodCost,
+        totalPrice: commissionableBasis,  // wood + stacking — commission applied to this
         stackingFee,
         buyerProcessingFee,
         sellerProcessingFee,
@@ -56,10 +59,11 @@ class OrderController {
           woodCost,
           stackingFee,
           deliveryFee,
+          commissionableBasis,   // wood + stacking — commission and seller fee apply here
           buyerProcessingFee,
           sellerProcessingFee,
           buyerTotal: buyerSubtotal + buyerProcessingFee,
-          sellerPayout: woodCost - sellerProcessingFee,
+          sellerPayout: commissionableBasis - sellerProcessingFee,
         }
       });
     } catch (error) {
