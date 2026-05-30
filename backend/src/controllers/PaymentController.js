@@ -38,7 +38,9 @@ class PaymentController {
       const isPickup = order.delivery_type === 'pickup';
       const deliveryFeeAmount = isPickup ? 0 : order.delivery_type === 'express' ? 4500 : 2500;
       const stackingFeeAmount = Math.round(parseFloat(order.stacking_fee || 0) * 100);
-      const woodAmount = Math.round(parseFloat(order.total_price) * 100);
+      // order.total_price = wood + stacking (commissionable basis); wood line item is just wood
+      const commissionableBasis = Math.round(parseFloat(order.total_price) * 100);
+      const woodOnlyAmount = commissionableBasis - stackingFeeAmount;
       const buyerProcessingFee = Math.round(parseFloat(order.buyer_processing_fee || 0) * 100);
 
       const lineItems = [
@@ -49,7 +51,7 @@ class PaymentController {
               name: `${order.wood_type} — ${order.quantity} ${order.unit || 'cords'}`,
               description: isPickup ? 'Pickup at supplier location' : `${order.delivery_type} delivery`
             },
-            unit_amount: woodAmount
+            unit_amount: woodOnlyAmount
           },
           quantity: 1
         }
@@ -100,6 +102,8 @@ class PaymentController {
           supplierId: String(order.supplier_id),
           accountType,
           commissionRate: String(commission),
+          // commissionable basis in cents — commission applies only to wood + stacking
+          commissionableBasis: String(commissionableBasis),
           sellerProcessingFee: String(order.seller_processing_fee || 0)
         }
       });
@@ -191,29 +195,35 @@ class PaymentController {
       switch (event.type) {
         case 'checkout.session.completed': {
           const session = event.data.object;
-          const { orderId, supplierId, commissionRate, accountType, sellerProcessingFee } = session.metadata;
+          const { orderId, commissionRate, accountType, commissionableBasis, sellerProcessingFee } = session.metadata;
+
           const amountTotal = session.amount_total / 100;
           const stripeFee = amountTotal * 0.029 + 0.30;
-          const commission = accountType === 'enterprise' ? 0 : amountTotal * parseFloat(commissionRate || 0);
+
+          // Commission applies only to wood + stacking (commissionableBasis), NOT to delivery or processing fees
+          const basis = parseFloat(commissionableBasis || 0) / 100;
+          const commissionAmount = accountType === 'enterprise' ? 0 : basis * parseFloat(commissionRate || 0);
+
           const sellerFee = parseFloat(sellerProcessingFee || 0);
-          const supplierPayout = amountTotal - commission - stripeFee - sellerFee;
+          // Supplier receives: commissionable basis minus commission and their processing fee
+          // Delivery fee goes to driver; processing fees offset Stripe cost
+          const supplierPayout = basis - commissionAmount - sellerFee;
 
           await pool.query(
-            'UPDATE orders SET payment_status = $1, updated_at = NOW() WHERE id = $2',
-            ['completed', orderId]
+            `UPDATE orders
+             SET payment_status = $1, platform_commission = $2, supplier_payout = $3, updated_at = NOW()
+             WHERE id = $4`,
+            ['completed', commissionAmount.toFixed(2), supplierPayout.toFixed(2), orderId]
           );
 
-          // Processing fee math:
-          // Buyer paid 2% on top → collected for processing
-          // Seller owes 2% → deducted from payout
-          // Together covers Stripe's 2.9% + $0.30 and nets a small margin
           console.log([
             `Order ${orderId} settled.`,
             `Buyer charged: $${amountTotal.toFixed(2)}`,
-            `Stripe fee: $${stripeFee.toFixed(2)}`,
-            `Commission: $${commission.toFixed(2)}`,
+            `Commissionable basis: $${basis.toFixed(2)}`,
+            `Commission (${Math.round(parseFloat(commissionRate || 0) * 100)}%): $${commissionAmount.toFixed(2)}`,
             `Seller processing fee: $${sellerFee.toFixed(2)}`,
-            `Supplier payout: $${supplierPayout.toFixed(2)}`
+            `Supplier payout: $${supplierPayout.toFixed(2)}`,
+            `Stripe fee: $${stripeFee.toFixed(2)}`
           ].join(' | '));
           break;
         }

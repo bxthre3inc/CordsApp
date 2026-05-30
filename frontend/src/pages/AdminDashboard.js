@@ -191,10 +191,10 @@ export default function AdminDashboard() {
           <div>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
               {[
-                { label: 'Total Users', value: parseInt(stats.users.total).toLocaleString(), sub: `${stats.users.suppliers} suppliers` },
-                { label: 'Buyers', value: parseInt(stats.users.buyers).toLocaleString(), sub: `${stats.users.drivers} drivers` },
-                { label: 'Total Orders', value: parseInt(stats.orders.total).toLocaleString(), sub: `${stats.orders.pending} pending` },
-                { label: 'Monthly Revenue', value: `$${parseFloat(stats.revenue_month).toLocaleString('en-US', { maximumFractionDigits: 0 })}`, sub: 'completed orders' },
+                { label: 'Total Users', value: parseInt(stats.users.total).toLocaleString(), sub: `${stats.users.suppliers} suppliers · ${stats.users.drivers} drivers` },
+                { label: 'Total Orders', value: parseInt(stats.orders.total).toLocaleString(), sub: `${stats.orders.pending} pending · ${stats.orders.delivered} delivered` },
+                { label: 'GMV This Month', value: `$${parseFloat(stats.gmv_month || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}`, sub: 'gross merchandise volume' },
+                { label: 'Commission This Month', value: `$${parseFloat(stats.commission?.commission_month || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, sub: `$${parseFloat(stats.commission?.commission_total || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })} all-time` },
                 { label: 'New This Week', value: stats.new_signups_week, sub: 'signups' },
               ].map(s => (
                 <div key={s.label} className="bg-white rounded-xl shadow p-5">
@@ -299,7 +299,8 @@ export default function AdminDashboard() {
                     <th className="px-4 py-3">Buyer</th>
                     <th className="px-4 py-3">Supplier</th>
                     <th className="px-4 py-3">Wood</th>
-                    <th className="px-4 py-3">Total</th>
+                    <th className="px-4 py-3">GMV</th>
+                    <th className="px-4 py-3">Commission</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Override</th>
                   </tr>
@@ -312,6 +313,9 @@ export default function AdminDashboard() {
                       <td className="px-4 py-3 text-gray-500">{o.supplier_name}</td>
                       <td className="px-4 py-3">{o.wood_type}</td>
                       <td className="px-4 py-3 font-semibold">${parseFloat(o.total_price).toFixed(2)}</td>
+                      <td className="px-4 py-3 text-green-700 font-medium">
+                        {o.platform_commission > 0 ? `$${parseFloat(o.platform_commission).toFixed(2)}` : <span className="text-gray-300">—</span>}
+                      </td>
                       <td className="px-4 py-3">
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[o.status]}`}>{o.status}</span>
                       </td>
@@ -330,7 +334,7 @@ export default function AdminDashboard() {
                     </tr>
                   ))}
                   {orders.length === 0 && (
-                    <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No orders found</td></tr>
+                    <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No orders found</td></tr>
                   )}
                 </tbody>
               </table>

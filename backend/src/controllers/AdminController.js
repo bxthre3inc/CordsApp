@@ -3,7 +3,7 @@ const pool = require('../config/database');
 class AdminController {
   static async getStats(req, res) {
     try {
-      const [users, orders, products, revenue, newSignups] = await Promise.all([
+      const [users, orders, products, revenue, newSignups, commissionStats] = await Promise.all([
         pool.query(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE role = 'supplier') as suppliers,
                     COUNT(*) FILTER (WHERE role = 'buyer') as buyers,
                     COUNT(*) FILTER (WHERE role = 'delivery') as drivers FROM users`),
@@ -12,16 +12,22 @@ class AdminController {
                     COUNT(*) FILTER (WHERE status = 'in_transit') as in_transit,
                     COUNT(*) FILTER (WHERE status = 'delivered') as delivered FROM orders`),
         pool.query(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE active = true) as active FROM products`),
-        pool.query(`SELECT COALESCE(SUM(total_price), 0) as month_revenue FROM orders
+        pool.query(`SELECT COALESCE(SUM(total_price), 0) as month_gmv FROM orders
                     WHERE status = 'delivered' AND created_at >= date_trunc('month', NOW())`),
-        pool.query(`SELECT COUNT(*) as count FROM users WHERE created_at >= NOW() - INTERVAL '7 days'`)
+        pool.query(`SELECT COUNT(*) as count FROM users WHERE created_at >= NOW() - INTERVAL '7 days'`),
+        pool.query(`SELECT
+                    COALESCE(SUM(platform_commission), 0) as commission_total,
+                    COALESCE(SUM(platform_commission) FILTER (WHERE created_at >= date_trunc('month', NOW())), 0) as commission_month,
+                    COALESCE(SUM(platform_commission) FILTER (WHERE created_at >= date_trunc('week', NOW())), 0) as commission_week
+                  FROM orders WHERE payment_status = 'completed'`)
       ]);
 
       res.json({
         users: users.rows[0],
         orders: orders.rows[0],
         products: products.rows[0],
-        revenue_month: parseFloat(revenue.rows[0].month_revenue),
+        gmv_month: parseFloat(revenue.rows[0].month_gmv),
+        commission: commissionStats.rows[0],
         new_signups_week: parseInt(newSignups.rows[0].count)
       });
     } catch (error) {
