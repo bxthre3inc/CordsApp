@@ -1,6 +1,16 @@
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const pool = require('../config/database');
 const Order = require('../models/Order');
 const Subscription = require('../models/Subscription');
+
+/*
+  Platform take by tier (before Stripe 2.9% + $0.30):
+    Free         → 20% commission.  Net ~17% after Stripe.
+    Starter      → 10% + $29.99/mo. Net ~7% per order + MRR.
+    Professional → 5%  + $99.99/mo. Net ~2% per order + MRR.
+    Enterprise   → 0% commission.   Revenue = monthly_fee + per_cord_fee (invoiced separately).
+                   Only Stripe processing passed through to supplier.
+*/
 
 class PaymentController {
   static async createOrderPayment(req, res) {
@@ -12,32 +22,99 @@ class PaymentController {
         return res.status(404).json({ error: 'Order not found' });
       }
 
-      const session = await stripe.checkout.sessions.create({
-        payment_method_types: ['card'],
-        line_items: [{
+      // Look up supplier account type
+      const profileResult = await pool.query(
+        'SELECT sp.account_type, ec.per_cord_fee FROM supplier_profiles sp LEFT JOIN enterprise_contracts ec ON sp.user_id = ec.user_id AND ec.status = $1 WHERE sp.user_id = $2',
+        ['active', order.supplier_id]
+      );
+      const profile = profileResult.rows[0];
+      const accountType = profile?.account_type || 'free';
+      const commission = Subscription.getPlanDetails(accountType).commission;
+
+      // For enterprise: no commission; buyer pays full price; platform bills supplier separately
+      // For others: commission is deducted from supplier payout (handled post-payment)
+      const buyerAmount = Math.round(parseFloat(order.total_price) * 100);
+
+      const isPickup = order.delivery_type === 'pickup';
+      // delivery_fee is stored on the order at creation (distance-based, from delivery.js)
+      const deliveryFeeAmount = Math.round(parseFloat(order.delivery_fee || 0) * 100);
+      const stackingFeeAmount = Math.round(parseFloat(order.stacking_fee || 0) * 100);
+      // order.total_price = wood + stacking (commissionable basis); wood line item is just wood
+      const commissionableBasis = Math.round(parseFloat(order.total_price) * 100);
+      const woodOnlyAmount = commissionableBasis - stackingFeeAmount;
+      const buyerProcessingFee = Math.round(parseFloat(order.buyer_processing_fee || 0) * 100);
+
+      const lineItems = [
+        {
           price_data: {
             currency: 'usd',
             product_data: {
-              name: `Wood Order - ${order.wood_type}`,
-              description: `${order.quantity} units of ${order.wood_type}`
+              name: `${order.wood_type} — ${order.quantity} ${order.unit || 'cords'}`,
+              description: isPickup ? 'Pickup at supplier location' : `${order.delivery_type} delivery`
             },
-            unit_amount: Math.round(order.total_price * 100)
+            unit_amount: woodOnlyAmount
           },
           quantity: 1
-        }],
+        }
+      ];
+
+      if (stackingFeeAmount > 0) {
+        lineItems.push({
+          price_data: {
+            currency: 'usd',
+            product_data: { name: 'Hand stacking service', description: `${order.quantity} cord(s) × $15` },
+            unit_amount: stackingFeeAmount
+          },
+          quantity: 1
+        });
+      }
+
+      if (deliveryFeeAmount > 0) {
+        lineItems.push({
+          price_data: {
+            currency: 'usd',
+            product_data: {
+              name: `${order.delivery_type === 'express' ? 'Express' : 'Standard'} delivery`,
+              description: `Distance-based rate per mile`
+            },
+            unit_amount: deliveryFeeAmount
+          },
+          quantity: 1
+        });
+      }
+
+      if (buyerProcessingFee > 0) {
+        lineItems.push({
+          price_data: {
+            currency: 'usd',
+            product_data: { name: 'Payment processing fee (2%)', description: 'Covers card processing costs' },
+            unit_amount: buyerProcessingFee
+          },
+          quantity: 1
+        });
+      }
+
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        line_items: lineItems,
         mode: 'payment',
         success_url: `${process.env.APP_URL}/orders/${orderId}/success`,
         cancel_url: `${process.env.APP_URL}/orders/${orderId}/cancel`,
         metadata: {
-          orderId: orderId,
-          buyerId: order.buyer_id
+          orderId: String(orderId),
+          buyerId: String(order.buyer_id),
+          supplierId: String(order.supplier_id),
+          accountType,
+          commissionRate: String(commission),
+          // commissionable basis in cents — commission applies only to wood + stacking
+          commissionableBasis: String(commissionableBasis),
+          // delivery fee in cents — platform takes 20%, driver keeps 80%
+          deliveryFeeAmount: String(deliveryFeeAmount),
+          sellerProcessingFee: String(order.seller_processing_fee || 0)
         }
       });
 
-      res.json({
-        checkoutUrl: session.url,
-        sessionId: session.id
-      });
+      res.json({ checkoutUrl: session.url, sessionId: session.id });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Failed to create payment session' });
@@ -122,16 +199,54 @@ class PaymentController {
       );
 
       switch (event.type) {
-        case 'checkout.session.completed':
-          // Handle successful payment
-          console.log('Payment successful:', event.data.object);
+        case 'checkout.session.completed': {
+          const session = event.data.object;
+          const {
+            orderId, commissionRate, accountType,
+            commissionableBasis, deliveryFeeAmount, sellerProcessingFee
+          } = session.metadata;
+
+          const PLATFORM_DELIVERY_RATE = 0.20;  // platform keeps 20% of delivery fee
+
+          const amountTotal = session.amount_total / 100;
+          const stripeFee = amountTotal * 0.029 + 0.30;
+
+          // Commission: only on wood + stacking (never on delivery or processing fees)
+          const basis = parseFloat(commissionableBasis || 0) / 100;
+          const commissionAmount = accountType === 'enterprise' ? 0 : basis * parseFloat(commissionRate || 0);
+
+          // Delivery split: platform keeps 20%, driver keeps 80%
+          const deliveryFee = parseFloat(deliveryFeeAmount || 0) / 100;
+          const platformDeliveryCut = deliveryFee * PLATFORM_DELIVERY_RATE;
+
+          const totalPlatformRevenue = commissionAmount + platformDeliveryCut;
+          const sellerFee = parseFloat(sellerProcessingFee || 0);
+          const supplierPayout = basis - commissionAmount - sellerFee;
+
+          await pool.query(
+            `UPDATE orders
+             SET payment_status = $1, platform_commission = $2, supplier_payout = $3, updated_at = NOW()
+             WHERE id = $4`,
+            ['completed', totalPlatformRevenue.toFixed(2), supplierPayout.toFixed(2), orderId]
+          );
+
+          console.log([
+            `Order ${orderId} settled.`,
+            `Buyer charged: $${amountTotal.toFixed(2)}`,
+            `Commissionable basis: $${basis.toFixed(2)}`,
+            `Commission (${Math.round(parseFloat(commissionRate || 0) * 100)}%): $${commissionAmount.toFixed(2)}`,
+            `Delivery fee: $${deliveryFee.toFixed(2)} → platform $${platformDeliveryCut.toFixed(2)} / driver $${(deliveryFee - platformDeliveryCut).toFixed(2)}`,
+            `Total platform revenue: $${totalPlatformRevenue.toFixed(2)}`,
+            `Supplier payout: $${supplierPayout.toFixed(2)}`,
+            `Stripe fee: $${stripeFee.toFixed(2)}`
+          ].join(' | '));
           break;
+        }
         case 'customer.subscription.updated':
-          // Handle subscription update
-          console.log('Subscription updated:', event.data.object);
+          console.log('Subscription updated:', event.data.object.id);
           break;
         default:
-          console.log(`Unhandled event type: ${event.type}`);
+          break;
       }
 
       res.json({ received: true });
