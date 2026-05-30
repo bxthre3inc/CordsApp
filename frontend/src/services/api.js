@@ -63,4 +63,24 @@ export const paymentService = {
   createSubscription: (planType) => apiClient.post('/payments/subscription', { planType })
 };
 
+export const deliveryService = {
+  getAssignedOrders: () => apiClient.get('/delivery/orders/assigned'),
+  getAvailableOrders: () => apiClient.get('/delivery/orders/available'),
+  acceptOrder: (id) => apiClient.post(`/delivery/orders/${id}/accept`),
+  updateOrderStatus: (id, status) => apiClient.put(`/delivery/orders/${id}/status`, { status }),
+  toggleAvailability: () => apiClient.put('/delivery/availability'),
+  getEarnings: () => apiClient.get('/delivery/earnings'),
+};
+
+export const adminService = {
+  getStats: () => apiClient.get('/admin/stats'),
+  getUsers: (params) => apiClient.get('/admin/users', { params }),
+  updateUser: (id, data) => apiClient.put(`/admin/users/${id}`, data),
+  deleteUser: (id) => apiClient.delete(`/admin/users/${id}`),
+  getOrders: (params) => apiClient.get('/admin/orders', { params }),
+  overrideOrderStatus: (id, status) => apiClient.put(`/admin/orders/${id}/status`, { status }),
+  getProducts: (params) => apiClient.get('/admin/products', { params }),
+  toggleProduct: (id) => apiClient.put(`/admin/products/${id}/toggle`),
+};
+
 export default apiClient;

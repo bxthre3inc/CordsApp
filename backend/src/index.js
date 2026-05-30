@@ -10,6 +10,8 @@ const orderRoutes = require('./routes/orders');
 const locationRoutes = require('./routes/locations');
 const subscriptionRoutes = require('./routes/subscriptions');
 const paymentRoutes = require('./routes/payments');
+const adminRoutes = require('./routes/admin');
+const deliveryRoutes = require('./routes/delivery');
 
 const app = express();
 
@@ -27,6 +29,8 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/locations', locationRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/delivery', deliveryRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
