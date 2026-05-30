@@ -83,4 +83,15 @@ export const adminService = {
   toggleProduct: (id) => apiClient.put(`/admin/products/${id}/toggle`),
 };
 
+export const enterpriseService = {
+  submitInquiry: (data) => apiClient.post('/enterprise/inquiry', data),
+  getMyContract: () => apiClient.get('/enterprise/contract/me'),
+  // Admin
+  getLeads: (params) => apiClient.get('/enterprise/leads', { params }),
+  updateLead: (id, data) => apiClient.put(`/enterprise/leads/${id}`, data),
+  getContracts: () => apiClient.get('/enterprise/contracts'),
+  upsertContract: (data) => apiClient.post('/enterprise/contracts', data),
+  cancelContract: (id) => apiClient.delete(`/enterprise/contracts/${id}`),
+};
+
 export default apiClient;

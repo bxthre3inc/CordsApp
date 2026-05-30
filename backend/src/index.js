@@ -12,6 +12,7 @@ const subscriptionRoutes = require('./routes/subscriptions');
 const paymentRoutes = require('./routes/payments');
 const adminRoutes = require('./routes/admin');
 const deliveryRoutes = require('./routes/delivery');
+const enterpriseRoutes = require('./routes/enterprise');
 
 const app = express();
 
@@ -31,6 +32,7 @@ app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/delivery', deliveryRoutes);
+app.use('/api/enterprise', enterpriseRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

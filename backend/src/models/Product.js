@@ -10,26 +10,23 @@ class Product {
       pricePerUnit,
       location,
       description,
-      image
+      image,
+      pickupAvailable = false,
+      pickupAddress = null
     } = productData;
 
     const query = `
       INSERT INTO products (
-        supplier_id, wood_type, quantity, unit, price_per_unit, 
-        location, description, image, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+        supplier_id, wood_type, quantity, unit, price_per_unit,
+        location, description, image, pickup_available, pickup_address, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
       RETURNING *;
     `;
 
     const result = await pool.query(query, [
-      supplierId,
-      woodType,
-      quantity,
-      unit,
-      pricePerUnit,
-      JSON.stringify(location),
-      description,
-      image
+      supplierId, woodType, quantity, unit, pricePerUnit,
+      JSON.stringify(location), description, image,
+      pickupAvailable, pickupAddress ? JSON.stringify(pickupAddress) : null
     ]);
 
     return result.rows[0];
@@ -95,19 +92,25 @@ class Product {
   }
 
   static async update(id, updateData) {
-    const { quantity, pricePerUnit, description, active } = updateData;
+    const { quantity, pricePerUnit, description, active, pickupAvailable, pickupAddress } = updateData;
     const query = `
-      UPDATE products 
+      UPDATE products
       SET quantity = COALESCE($1, quantity),
           price_per_unit = COALESCE($2, price_per_unit),
           description = COALESCE($3, description),
           active = COALESCE($4, active),
+          pickup_available = COALESCE($5, pickup_available),
+          pickup_address = COALESCE($6, pickup_address),
           updated_at = NOW()
-      WHERE id = $5
+      WHERE id = $7
       RETURNING *;
     `;
 
-    const result = await pool.query(query, [quantity, pricePerUnit, description, active, id]);
+    const result = await pool.query(query, [
+      quantity, pricePerUnit, description, active,
+      pickupAvailable, pickupAddress ? JSON.stringify(pickupAddress) : null,
+      id
+    ]);
     return result.rows[0];
   }
 }

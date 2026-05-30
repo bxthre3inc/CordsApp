@@ -35,28 +35,46 @@ class Subscription {
     return result.rows[0];
   }
 
-  static async getPlanDetails(planType) {
+  static getPlanDetails(planType) {
     const plans = {
       'free': {
         name: 'Free',
         price: 0,
-        commission: 0.20, // 20% commission
-        features: ['Limited product listings', 'Basic analytics']
+        commission: 0.20,
+        features: ['Up to 5 active listings', 'Basic analytics', 'Standard support']
       },
       'starter': {
         name: 'Starter',
         price: 29.99,
-        commission: 0.10, // 10% commission
-        features: ['Unlimited product listings', 'Advanced analytics', 'Priority support']
+        commission: 0.10,
+        features: ['Unlimited listings', 'Advanced analytics', 'Priority support', 'Pickup option']
       },
       'professional': {
         name: 'Professional',
         price: 99.99,
-        commission: 0.05, // 5% commission
-        features: ['All Starter features', 'Featured listings', 'Custom branding', 'API access']
+        commission: 0.05,
+        features: ['All Starter features', 'Featured listings', 'Custom branding', 'API access', 'Buyer premium integration']
+      },
+      'enterprise': {
+        name: 'Enterprise',
+        price: null,         // negotiated — billed via Stripe invoice
+        commission: 0,       // no commission; revenue from monthly_fee + per_cord_fee
+        features: ['Everything in Professional', 'Custom per-cord or monthly flat rate', 'Negotiated per-mile delivery cut', 'Only pay card processing fees', 'Dedicated account manager', 'SLA support', 'Custom contract']
       }
     };
-    return plans[planType];
+    return plans[planType] || plans['free'];
+  }
+
+  // Returns commission rate for a supplier given their account_type
+  static async getCommissionRate(supplierId) {
+    const pool = require('../config/database');
+    const result = await pool.query(
+      'SELECT account_type FROM supplier_profiles WHERE user_id = $1',
+      [supplierId]
+    );
+    const accountType = result.rows[0]?.account_type || 'free';
+    const plan = this.getPlanDetails(accountType);
+    return plan.commission;
   }
 }
 

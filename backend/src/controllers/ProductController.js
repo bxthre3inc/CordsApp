@@ -6,6 +6,8 @@ class ProductController {
       const { userId } = req.user;
       const { woodType, quantity, unit, pricePerUnit, location, description, image } = req.body;
 
+      const { woodType, quantity, unit, pricePerUnit, location, description, image, pickupAvailable, pickupAddress } = req.body;
+
       const product = await Product.create({
         supplierId: userId,
         woodType,
@@ -14,7 +16,9 @@ class ProductController {
         pricePerUnit,
         location,
         description,
-        image
+        image,
+        pickupAvailable: pickupAvailable || false,
+        pickupAddress: pickupAddress || null
       });
 
       res.status(201).json({
@@ -101,13 +105,15 @@ class ProductController {
   static async update(req, res) {
     try {
       const { id } = req.params;
-      const { quantity, pricePerUnit, description, active } = req.body;
+      const { quantity, pricePerUnit, description, active, pickupAvailable, pickupAddress } = req.body;
 
       const product = await Product.update(id, {
         quantity,
         pricePerUnit,
         description,
-        active
+        active,
+        pickupAvailable,
+        pickupAddress
       });
 
       res.json({

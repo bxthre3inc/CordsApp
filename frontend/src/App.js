@@ -8,6 +8,7 @@ import SupplierDashboard from './pages/SupplierDashboard';
 import DeliveryDashboard from './pages/DeliveryDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import GuestDemo from './pages/GuestDemo';
+import EnterprisePage from './pages/EnterprisePage';
 import './App.css';
 
 const ProtectedRoute = ({ children, allowedRoles }) => {
@@ -42,6 +43,7 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/demo" element={<GuestDemo />} />
+          <Route path="/enterprise" element={<EnterprisePage />} />
           <Route
             path="/dashboard"
             element={

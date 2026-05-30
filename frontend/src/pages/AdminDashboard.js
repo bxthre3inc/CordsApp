@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { adminService } from '../services/api';
+import { adminService, enterpriseService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
 const STATUS_COLORS = {
@@ -24,6 +24,8 @@ export default function AdminDashboard() {
   const [users, setUsers] = useState([]);
   const [orders, setOrders] = useState([]);
   const [products, setProducts] = useState([]);
+  const [leads, setLeads] = useState([]);
+  const [contracts, setContracts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [userSearch, setUserSearch] = useState('');
   const [orderStatusFilter, setOrderStatusFilter] = useState('');
@@ -37,6 +39,7 @@ export default function AdminDashboard() {
     if (tab === 'users') loadUsers();
     if (tab === 'orders') loadOrders();
     if (tab === 'products') loadProducts();
+    if (tab === 'enterprise') loadEnterprise();
   }, [tab]);
 
   const showToast = (msg, type = 'success') => {
@@ -82,6 +85,36 @@ export default function AdminDashboard() {
     }
   };
 
+  const loadEnterprise = async () => {
+    try {
+      const [leadsRes, contractsRes] = await Promise.all([
+        enterpriseService.getLeads(),
+        enterpriseService.getContracts(),
+      ]);
+      setLeads(leadsRes.data);
+      setContracts(contractsRes.data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const updateLeadStatus = async (id, status) => {
+    try {
+      await enterpriseService.updateLead(id, { status });
+      showToast('Lead updated');
+      loadEnterprise();
+    } catch { showToast('Failed to update lead', 'error'); }
+  };
+
+  const cancelContract = async (id) => {
+    if (!window.confirm('Cancel this enterprise contract?')) return;
+    try {
+      await enterpriseService.cancelContract(id);
+      showToast('Contract cancelled');
+      loadEnterprise();
+    } catch { showToast('Failed to cancel', 'error'); }
+  };
+
   const updateUserRole = async (userId, role) => {
     try {
       await adminService.updateUser(userId, { role });
@@ -123,7 +156,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const TABS = ['overview', 'users', 'orders', 'products'];
+  const TABS = ['overview', 'users', 'orders', 'products', 'enterprise'];
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -346,6 +379,103 @@ export default function AdminDashboard() {
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {tab === 'enterprise' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl shadow overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-100 flex justify-between items-center">
+                <h2 className="font-bold text-gray-900">Leads ({leads.length})</h2>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr className="text-left text-gray-500 text-xs uppercase">
+                      <th className="px-4 py-3">Company</th>
+                      <th className="px-4 py-3">Contact</th>
+                      <th className="px-4 py-3">Est. Cords/mo</th>
+                      <th className="px-4 py-3">Delivers</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {leads.map(l => (
+                      <tr key={l.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-medium text-gray-900">{l.company_name}</td>
+                        <td className="px-4 py-3 text-gray-500">{l.contact_name}<br /><span className="text-xs">{l.contact_email}</span></td>
+                        <td className="px-4 py-3">{l.estimated_monthly_cords || '—'}</td>
+                        <td className="px-4 py-3">{l.delivers ? '✓' : '—'}</td>
+                        <td className="px-4 py-3">
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                            l.status === 'new' ? 'bg-blue-100 text-blue-700' :
+                            l.status === 'contacted' ? 'bg-yellow-100 text-yellow-700' :
+                            l.status === 'converted' ? 'bg-green-100 text-green-700' :
+                            'bg-gray-100 text-gray-500'
+                          }`}>{l.status}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <select defaultValue="" onChange={e => { if (e.target.value) updateLeadStatus(l.id, e.target.value); }}
+                            className="text-xs border border-gray-200 rounded px-1 py-0.5">
+                            <option value="">Update</option>
+                            {['new', 'contacted', 'converted', 'lost'].map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                    {leads.length === 0 && (
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No enterprise leads yet</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl shadow overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-100">
+                <h2 className="font-bold text-gray-900">Active Contracts ({contracts.filter(c => c.status === 'active').length})</h2>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr className="text-left text-gray-500 text-xs uppercase">
+                      <th className="px-4 py-3">Company</th>
+                      <th className="px-4 py-3">Supplier</th>
+                      <th className="px-4 py-3">Monthly Fee</th>
+                      <th className="px-4 py-3">Per Cord</th>
+                      <th className="px-4 py-3">Per Mile</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {contracts.map(c => (
+                      <tr key={c.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-medium text-gray-900">{c.company_name}</td>
+                        <td className="px-4 py-3 text-gray-500">{c.first_name} {c.last_name}<br /><span className="text-xs">{c.email}</span></td>
+                        <td className="px-4 py-3 font-semibold">${parseFloat(c.monthly_fee || 0).toFixed(2)}/mo</td>
+                        <td className="px-4 py-3">${parseFloat(c.per_cord_fee || 0).toFixed(2)}</td>
+                        <td className="px-4 py-3">{c.per_mile_fee ? `$${parseFloat(c.per_mile_fee).toFixed(2)}` : '—'}</td>
+                        <td className="px-4 py-3">
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${c.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                            {c.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {c.status === 'active' && (
+                            <button onClick={() => cancelContract(c.id)} className="text-xs text-red-500 hover:text-red-700 font-medium">Cancel</button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {contracts.length === 0 && (
+                      <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No enterprise contracts yet</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
