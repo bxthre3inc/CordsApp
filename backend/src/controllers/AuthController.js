@@ -45,7 +45,8 @@ class AuthController {
           email: user.email,
           role: user.role,
           firstName: user.first_name,
-          lastName: user.last_name
+          lastName: user.last_name,
+          location: user.location || null,
         }
       });
     } catch (error) {
@@ -81,7 +82,8 @@ class AuthController {
           email: user.email,
           role: user.role,
           firstName: user.first_name,
-          lastName: user.last_name
+          lastName: user.last_name,
+          location: user.location || null,
         }
       });
     } catch (error) {

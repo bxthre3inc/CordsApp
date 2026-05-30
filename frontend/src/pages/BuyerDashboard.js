@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { productService, orderService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import DeliveryLocationPicker from '../components/DeliveryLocationPicker';
+
+const STACKING_FEE_PER_CORD = 15.00; // must match backend constant
 
 const woodTypes = ['Oak', 'Maple', 'Pine', 'Cherry', 'Walnut', 'Birch', 'Ash', 'Cedar'];
 
@@ -21,8 +24,15 @@ export default function BuyerDashboard() {
   const [priceData, setPriceData] = useState(null);
   const [orders, setOrders] = useState([]);
   const [tab, setTab] = useState('browse');
-  const [orderModal, setOrderModal] = useState(null); // product to order
-  const [orderForm, setOrderForm] = useState({ quantity: 1, fulfillmentType: 'delivery', deliveryType: 'standard' });
+  const [orderModal, setOrderModal] = useState(null);
+  const [orderForm, setOrderForm] = useState({
+    quantity: 1,
+    fulfillmentType: 'delivery',
+    deliveryType: 'standard',
+    deliveryLocation: null,
+    gateCode: '',
+    deliveryNotes: '',
+  });
   const [ordering, setOrdering] = useState(false);
   const [toast, setToast] = useState(null);
 
@@ -63,21 +73,35 @@ export default function BuyerDashboard() {
 
   const openOrderModal = (product) => {
     setOrderModal(product);
-    setOrderForm({ quantity: 1, fulfillmentType: product.pickup_available ? 'delivery' : 'delivery', deliveryType: 'standard' });
+    // Pre-fill delivery location from user's saved address
+    const savedLocation = user?.location?.latitude ? user.location : (location || null);
+    setOrderForm({
+      quantity: 1,
+      fulfillmentType: 'delivery',
+      deliveryType: 'standard',
+      deliveryLocation: savedLocation,
+      gateCode: '',
+      deliveryNotes: '',
+    });
   };
 
   const submitOrder = async () => {
-    if (!location) { showToast('Location required for delivery', 'error'); return; }
+    const isPickup = orderForm.fulfillmentType === 'pickup';
+    if (!isPickup && !orderForm.deliveryLocation) {
+      showToast('Please set your delivery location on the map', 'error');
+      return;
+    }
     setOrdering(true);
     try {
-      const isPickup = orderForm.fulfillmentType === 'pickup';
       await orderService.create({
         productId: orderModal.id,
         quantity: orderForm.quantity,
-        deliveryLocation: isPickup ? orderModal.pickup_address : location,
+        deliveryLocation: isPickup ? null : orderForm.deliveryLocation,
         deliveryDate: null,
         paymentMethod: 'card',
         deliveryType: isPickup ? 'pickup' : orderForm.deliveryType,
+        gateCode: orderForm.gateCode || null,
+        deliveryNotes: orderForm.deliveryNotes || null,
       });
       setOrderModal(null);
       showToast('Order placed! Proceed to payment.');
@@ -87,10 +111,11 @@ export default function BuyerDashboard() {
     finally { setOrdering(false); }
   };
 
-  const totalCost = orderModal
-    ? (parseFloat(orderModal.price_per_unit) * orderForm.quantity +
-      (orderForm.fulfillmentType === 'pickup' ? 0 : orderForm.deliveryType === 'express' ? 45 : 25))
-    : 0;
+  const isPickup = orderForm.fulfillmentType === 'pickup';
+  const woodCost = orderModal ? parseFloat(orderModal.price_per_unit) * orderForm.quantity : 0;
+  const stackingFee = isPickup ? 0 : orderForm.quantity * STACKING_FEE_PER_CORD;
+  const deliveryFee = isPickup ? 0 : (orderForm.deliveryType === 'express' ? 45 : 25);
+  const totalCost = woodCost + stackingFee + deliveryFee;
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -220,85 +245,163 @@ export default function BuyerDashboard() {
 
       {/* Order modal */}
       {orderModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
-            <h2 className="text-xl font-bold text-gray-900 mb-1">{orderModal.wood_type}</h2>
-            <p className="text-sm text-gray-500 mb-5">{orderModal.first_name} {orderModal.last_name} · ${parseFloat(orderModal.price_per_unit).toFixed(2)}/cord</p>
+        <div className="fixed inset-0 bg-black/60 flex items-start justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg my-8">
+            {/* Header */}
+            <div className="px-6 pt-6 pb-4 border-b border-gray-100">
+              <h2 className="text-xl font-bold text-gray-900">{orderModal.wood_type}</h2>
+              <p className="text-sm text-gray-500">{orderModal.first_name} {orderModal.last_name} · ${parseFloat(orderModal.price_per_unit).toFixed(2)}/cord</p>
+            </div>
 
-            <div className="space-y-4">
+            <div className="px-6 py-5 space-y-5">
+              {/* Quantity */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Quantity (cords)</label>
-                <input type="number" min="1" max={orderModal.quantity} value={orderForm.quantity}
-                  onChange={e => setOrderForm({ ...orderForm, quantity: parseInt(e.target.value) || 1 })}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+                <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+                <div className="flex items-center gap-3">
+                  <button onClick={() => setOrderForm(f => ({ ...f, quantity: Math.max(1, f.quantity - 1) }))}
+                    className="w-9 h-9 rounded-full border border-gray-200 text-lg font-medium hover:bg-gray-50 flex items-center justify-center">−</button>
+                  <span className="text-xl font-bold text-gray-900 w-8 text-center">{orderForm.quantity}</span>
+                  <button onClick={() => setOrderForm(f => ({ ...f, quantity: Math.min(orderModal.quantity, f.quantity + 1) }))}
+                    className="w-9 h-9 rounded-full border border-gray-200 text-lg font-medium hover:bg-gray-50 flex items-center justify-center">+</button>
+                  <span className="text-sm text-gray-400 ml-1">cord{orderForm.quantity !== 1 ? 's' : ''} ({orderModal.quantity} available)</span>
+                </div>
               </div>
 
+              {/* Fulfillment type */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Fulfillment</label>
                 <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => setOrderForm({ ...orderForm, fulfillmentType: 'delivery' })}
-                    className={`py-2.5 rounded-lg text-sm font-medium border-2 ${orderForm.fulfillmentType === 'delivery' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600'}`}>
-                    🚚 Delivery
+                  <button onClick={() => setOrderForm(f => ({ ...f, fulfillmentType: 'delivery' }))}
+                    className={`py-3 rounded-xl text-sm font-medium border-2 transition-all ${!isPickup ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                    🚚 Deliver to me
                   </button>
-                  <button onClick={() => setOrderForm({ ...orderForm, fulfillmentType: 'pickup' })}
+                  <button onClick={() => setOrderForm(f => ({ ...f, fulfillmentType: 'pickup' }))}
                     disabled={!orderModal.pickup_available}
-                    className={`py-2.5 rounded-lg text-sm font-medium border-2 disabled:opacity-40 disabled:cursor-not-allowed ${orderForm.fulfillmentType === 'pickup' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 text-gray-600'}`}>
-                    📍 Pickup {!orderModal.pickup_available && '(unavailable)'}
+                    className={`py-3 rounded-xl text-sm font-medium border-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed ${isPickup ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                    📍 I'll pick up {!orderModal.pickup_available && <span className="block text-xs font-normal">(not offered)</span>}
                   </button>
                 </div>
               </div>
 
-              {orderForm.fulfillmentType === 'delivery' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Delivery speed</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { key: 'standard', label: 'Standard', sub: '+$25 · 2–3 days' },
-                      { key: 'express', label: 'Express', sub: '+$45 · next day' },
-                    ].map(d => (
-                      <button key={d.key} onClick={() => setOrderForm({ ...orderForm, deliveryType: d.key })}
-                        className={`py-2.5 px-3 rounded-lg text-sm text-left border-2 ${orderForm.deliveryType === d.key ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
-                        <p className="font-medium text-gray-900">{d.label}</p>
-                        <p className="text-xs text-gray-500">{d.sub}</p>
-                      </button>
-                    ))}
+              {/* Delivery flow */}
+              {!isPickup && (
+                <>
+                  {/* Delivery speed */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Delivery speed</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { key: 'standard', label: 'Standard', sub: '2–3 days · +$25' },
+                        { key: 'express', label: 'Express', sub: 'Next day · +$45' },
+                      ].map(d => (
+                        <button key={d.key} onClick={() => setOrderForm(f => ({ ...f, deliveryType: d.key }))}
+                          className={`py-2.5 px-3 rounded-xl text-sm text-left border-2 transition-all ${orderForm.deliveryType === d.key ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                          <p className="font-medium text-gray-900">{d.label}</p>
+                          <p className="text-xs text-gray-500">{d.sub}</p>
+                        </button>
+                      ))}
+                    </div>
                   </div>
+
+                  {/* Stacking notice — required */}
+                  <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                    <span className="text-xl mt-0.5">🪵</span>
+                    <div>
+                      <p className="text-sm font-semibold text-amber-900">Hand stacking included — ${STACKING_FEE_PER_CORD}/cord</p>
+                      <p className="text-xs text-amber-700 mt-0.5">All Cords drivers hand-stack your delivery. Let them know exactly where in the notes below.</p>
+                    </div>
+                  </div>
+
+                  {/* Map */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Stacking location
+                      <span className="ml-1 text-xs text-gray-400 font-normal">— drag pin to exact spot</span>
+                    </label>
+                    <DeliveryLocationPicker
+                      initialLocation={user?.location || location}
+                      onChange={pos => setOrderForm(f => ({ ...f, deliveryLocation: pos }))}
+                    />
+                  </div>
+
+                  {/* Gate code */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Gate / door code
+                      <span className="ml-1 text-xs text-gray-400 font-normal">optional</span>
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={30}
+                      placeholder="e.g. #1234 or ring bell"
+                      value={orderForm.gateCode}
+                      onChange={e => setOrderForm(f => ({ ...f, gateCode: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm font-mono"
+                    />
+                  </div>
+
+                  {/* Delivery notes */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Delivery notes
+                      <span className="ml-1 text-xs text-gray-400 font-normal">optional</span>
+                    </label>
+                    <textarea
+                      rows={3}
+                      placeholder="e.g. Stack next to garage · Beware of dog · Driveway is gravel · Call on arrival · Gate code above lets you in through back yard"
+                      value={orderForm.deliveryNotes}
+                      onChange={e => setOrderForm(f => ({ ...f, deliveryNotes: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm resize-none"
+                    />
+                  </div>
+                </>
+              )}
+
+              {isPickup && (
+                <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-sm text-green-800">
+                  <p className="font-semibold mb-1">📍 Pickup at supplier location</p>
+                  <p className="text-xs text-green-700">No delivery or stacking fee. The supplier will confirm pickup details after you place the order.</p>
                 </div>
               )}
 
-              {orderForm.fulfillmentType === 'pickup' && (
-                <div className="p-3 bg-green-50 rounded-lg text-sm text-green-700">
-                  📍 You'll pick up at the supplier's location. No delivery fee.
+              {/* Price breakdown */}
+              <div className="bg-gray-50 rounded-xl p-4 space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">{orderModal.wood_type} × {orderForm.quantity} cord{orderForm.quantity !== 1 ? 's' : ''}</span>
+                  <span className="font-medium">${woodCost.toFixed(2)}</span>
                 </div>
-              )}
-
-              <div className="pt-3 border-t border-gray-100">
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="text-gray-500">Wood ({orderForm.quantity} cords)</span>
-                  <span>${(parseFloat(orderModal.price_per_unit) * orderForm.quantity).toFixed(2)}</span>
-                </div>
-                {orderForm.fulfillmentType === 'delivery' && (
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-gray-500">Delivery fee</span>
-                    <span>${orderForm.deliveryType === 'express' ? '45.00' : '25.00'}</span>
-                  </div>
+                {!isPickup && (
+                  <>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Hand stacking ({orderForm.quantity} cord{orderForm.quantity !== 1 ? 's' : ''} × ${STACKING_FEE_PER_CORD})</span>
+                      <span className="font-medium">${stackingFee.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">{orderForm.deliveryType === 'express' ? 'Express' : 'Standard'} delivery</span>
+                      <span className="font-medium">${deliveryFee.toFixed(2)}</span>
+                    </div>
+                  </>
                 )}
-                <div className="flex justify-between font-bold text-lg mt-2">
+                <div className="flex justify-between font-bold text-base pt-2 border-t border-gray-200">
                   <span>Total</span>
                   <span className="text-blue-600">${totalCost.toFixed(2)}</span>
                 </div>
+                {!isPickup && (
+                  <p className="text-xs text-gray-400">Card processing fee (2.9% + $0.30) applied at checkout</p>
+                )}
               </div>
+            </div>
 
-              <div className="flex gap-2">
-                <button onClick={() => setOrderModal(null)}
-                  className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50">
-                  Cancel
-                </button>
-                <button onClick={submitOrder} disabled={ordering}
-                  className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
-                  {ordering ? 'Placing...' : 'Place Order'}
-                </button>
-              </div>
+            {/* Footer actions */}
+            <div className="px-6 pb-6 flex gap-3">
+              <button onClick={() => setOrderModal(null)}
+                className="flex-1 py-3 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50">
+                Cancel
+              </button>
+              <button onClick={submitOrder} disabled={ordering}
+                className="flex-1 py-3 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
+                {ordering ? 'Placing order...' : `Place Order · $${totalCost.toFixed(2)}`}
+              </button>
             </div>
           </div>
         </div>

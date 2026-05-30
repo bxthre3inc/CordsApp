@@ -8,32 +8,30 @@ class Order {
       productId,
       quantity,
       totalPrice,
+      stackingFee = 0,
       deliveryLocation,
       deliveryDate,
       status,
       paymentMethod,
-      deliveryType
+      deliveryType,
+      gateCode = null,
+      deliveryNotes = null,
     } = orderData;
 
     const query = `
       INSERT INTO orders (
-        buyer_id, supplier_id, product_id, quantity, total_price,
-        delivery_location, delivery_date, status, payment_method, delivery_type, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+        buyer_id, supplier_id, product_id, quantity, total_price, stacking_fee,
+        delivery_location, delivery_date, status, payment_method, delivery_type,
+        gate_code, delivery_notes, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
       RETURNING *;
     `;
 
     const result = await pool.query(query, [
-      buyerId,
-      supplierId,
-      productId,
-      quantity,
-      totalPrice,
-      JSON.stringify(deliveryLocation),
-      deliveryDate,
-      status,
-      paymentMethod,
-      deliveryType
+      buyerId, supplierId, productId, quantity, totalPrice, stackingFee,
+      deliveryLocation ? JSON.stringify(deliveryLocation) : null,
+      deliveryDate, status, paymentMethod, deliveryType,
+      gateCode, deliveryNotes,
     ]);
 
     return result.rows[0];
@@ -41,7 +39,9 @@ class Order {
 
   static async findById(id) {
     const query = `
-      SELECT o.*, p.wood_type, u_s.first_name as supplier_name, u_b.first_name as buyer_name
+      SELECT o.*, p.wood_type, p.unit,
+        u_s.first_name as supplier_name, u_s.phone as supplier_phone,
+        u_b.first_name as buyer_name, u_b.phone as buyer_phone
       FROM orders o
       JOIN products p ON o.product_id = p.id
       JOIN users u_s ON o.supplier_id = u_s.id
@@ -54,7 +54,7 @@ class Order {
 
   static async findByBuyer(buyerId) {
     const query = `
-      SELECT o.*, p.wood_type, u.first_name as supplier_name
+      SELECT o.*, p.wood_type, p.unit, u.first_name as supplier_name
       FROM orders o
       JOIN products p ON o.product_id = p.id
       JOIN users u ON o.supplier_id = u.id
@@ -67,7 +67,8 @@ class Order {
 
   static async findBySupplier(supplierId) {
     const query = `
-      SELECT o.*, p.wood_type, u.first_name as buyer_name, u.phone
+      SELECT o.*, p.wood_type, p.unit,
+        u.first_name as buyer_name, u.last_name as buyer_last_name, u.phone as buyer_phone
       FROM orders o
       JOIN products p ON o.product_id = p.id
       JOIN users u ON o.buyer_id = u.id

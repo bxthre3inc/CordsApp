@@ -145,6 +145,31 @@ export default function DeliveryDashboard() {
               </div>
             </div>
 
+            {/* Gate code — shown prominently if set */}
+            {activeOrder.gate_code && (
+              <div className="flex items-center gap-3 bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3 mb-3">
+                <span className="text-xl">🔑</span>
+                <div>
+                  <p className="text-xs text-yellow-700 font-medium uppercase tracking-wide">Gate / Door Code</p>
+                  <p className="text-base font-mono font-bold text-yellow-900">{activeOrder.gate_code}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Delivery notes */}
+            {activeOrder.delivery_notes && (
+              <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 mb-3">
+                <p className="text-xs text-blue-600 font-medium uppercase tracking-wide mb-1">Buyer Notes</p>
+                <p className="text-sm text-blue-900">{activeOrder.delivery_notes}</p>
+              </div>
+            )}
+
+            {/* Stacking reminder */}
+            <div className="flex items-center gap-2 bg-amber-50 border border-amber-100 rounded-xl px-4 py-2 mb-3 text-xs text-amber-800">
+              <span>🪵</span>
+              <span><strong>Hand stacking required</strong> — stack wood at location buyer indicated.</span>
+            </div>
+
             <div className="flex gap-2">
               {activeOrder.status === 'confirmed' && (
                 <button

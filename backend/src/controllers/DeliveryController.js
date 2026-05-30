@@ -5,9 +5,10 @@ class DeliveryController {
     try {
       const { userId } = req.user;
       const result = await pool.query(`
-        SELECT o.*, p.wood_type,
+        SELECT o.*, p.wood_type, p.unit,
           u_b.first_name || ' ' || u_b.last_name as buyer_name, u_b.phone as buyer_phone,
-          u_s.first_name || ' ' || u_s.last_name as supplier_name, u_s.phone as supplier_phone
+          u_s.first_name || ' ' || u_s.last_name as supplier_name, u_s.phone as supplier_phone,
+          o.gate_code, o.delivery_notes, o.stacking_fee
         FROM orders o
         JOIN products p ON o.product_id = p.id
         JOIN users u_b ON o.buyer_id = u_b.id
