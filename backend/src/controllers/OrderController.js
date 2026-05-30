@@ -3,10 +3,11 @@ const Product = require('../models/Product');
 const pool = require('../config/database');
 const emailService = require('../services/EmailService');
 
-const STACKING_FEE_PER_CORD = 15.00;   // required on all delivery orders
+const STACKING_FEE_PER_CORD = 15.00;
 const DELIVERY_FEE_STANDARD  = 25.00;
 const DELIVERY_FEE_EXPRESS   = 45.00;
 const PROCESSING_FEE_RATE    = 0.02;   // 2% charged to buyer, 2% deducted from seller
+const PLATFORM_DELIVERY_RATE = 0.20;   // platform keeps 20% of delivery fee; driver keeps 80%
 
 class OrderController {
   static async create(req, res) {
@@ -43,6 +44,7 @@ class OrderController {
         quantity,
         totalPrice: commissionableBasis,  // wood + stacking — commission applied to this
         stackingFee,
+        deliveryFee,
         buyerProcessingFee,
         sellerProcessingFee,
         deliveryLocation: isPickup ? null : deliveryLocation,
@@ -73,7 +75,9 @@ class OrderController {
           woodCost,
           stackingFee,
           deliveryFee,
-          commissionableBasis,   // wood + stacking — commission and seller fee apply here
+          platformDeliveryFee: parseFloat((deliveryFee * PLATFORM_DELIVERY_RATE).toFixed(2)),
+          driverDeliveryPayout: parseFloat((deliveryFee * (1 - PLATFORM_DELIVERY_RATE)).toFixed(2)),
+          commissionableBasis,
           buyerProcessingFee,
           sellerProcessingFee,
           buyerTotal: buyerSubtotal + buyerProcessingFee,

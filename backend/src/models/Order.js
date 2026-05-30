@@ -9,6 +9,7 @@ class Order {
       quantity,
       totalPrice,
       stackingFee = 0,
+      deliveryFee = 0,
       buyerProcessingFee = 0,
       sellerProcessingFee = 0,
       deliveryLocation,
@@ -22,16 +23,16 @@ class Order {
 
     const query = `
       INSERT INTO orders (
-        buyer_id, supplier_id, product_id, quantity, total_price, stacking_fee,
+        buyer_id, supplier_id, product_id, quantity, total_price, stacking_fee, delivery_fee,
         buyer_processing_fee, seller_processing_fee,
         delivery_location, delivery_date, status, payment_method, delivery_type,
         gate_code, delivery_notes, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW())
       RETURNING *;
     `;
 
     const result = await pool.query(query, [
-      buyerId, supplierId, productId, quantity, totalPrice, stackingFee,
+      buyerId, supplierId, productId, quantity, totalPrice, stackingFee, deliveryFee,
       buyerProcessingFee, sellerProcessingFee,
       deliveryLocation ? JSON.stringify(deliveryLocation) : null,
       deliveryDate, status, paymentMethod, deliveryType,

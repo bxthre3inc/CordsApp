@@ -104,6 +104,8 @@ class PaymentController {
           commissionRate: String(commission),
           // commissionable basis in cents — commission applies only to wood + stacking
           commissionableBasis: String(commissionableBasis),
+          // delivery fee in cents — platform takes 20%, driver keeps 80%
+          deliveryFeeAmount: String(deliveryFeeAmount),
           sellerProcessingFee: String(order.seller_processing_fee || 0)
         }
       });
@@ -195,25 +197,33 @@ class PaymentController {
       switch (event.type) {
         case 'checkout.session.completed': {
           const session = event.data.object;
-          const { orderId, commissionRate, accountType, commissionableBasis, sellerProcessingFee } = session.metadata;
+          const {
+            orderId, commissionRate, accountType,
+            commissionableBasis, deliveryFeeAmount, sellerProcessingFee
+          } = session.metadata;
+
+          const PLATFORM_DELIVERY_RATE = 0.20;  // platform keeps 20% of delivery fee
 
           const amountTotal = session.amount_total / 100;
           const stripeFee = amountTotal * 0.029 + 0.30;
 
-          // Commission applies only to wood + stacking (commissionableBasis), NOT to delivery or processing fees
+          // Commission: only on wood + stacking (never on delivery or processing fees)
           const basis = parseFloat(commissionableBasis || 0) / 100;
           const commissionAmount = accountType === 'enterprise' ? 0 : basis * parseFloat(commissionRate || 0);
 
+          // Delivery split: platform keeps 20%, driver keeps 80%
+          const deliveryFee = parseFloat(deliveryFeeAmount || 0) / 100;
+          const platformDeliveryCut = deliveryFee * PLATFORM_DELIVERY_RATE;
+
+          const totalPlatformRevenue = commissionAmount + platformDeliveryCut;
           const sellerFee = parseFloat(sellerProcessingFee || 0);
-          // Supplier receives: commissionable basis minus commission and their processing fee
-          // Delivery fee goes to driver; processing fees offset Stripe cost
           const supplierPayout = basis - commissionAmount - sellerFee;
 
           await pool.query(
             `UPDATE orders
              SET payment_status = $1, platform_commission = $2, supplier_payout = $3, updated_at = NOW()
              WHERE id = $4`,
-            ['completed', commissionAmount.toFixed(2), supplierPayout.toFixed(2), orderId]
+            ['completed', totalPlatformRevenue.toFixed(2), supplierPayout.toFixed(2), orderId]
           );
 
           console.log([
@@ -221,7 +231,8 @@ class PaymentController {
             `Buyer charged: $${amountTotal.toFixed(2)}`,
             `Commissionable basis: $${basis.toFixed(2)}`,
             `Commission (${Math.round(parseFloat(commissionRate || 0) * 100)}%): $${commissionAmount.toFixed(2)}`,
-            `Seller processing fee: $${sellerFee.toFixed(2)}`,
+            `Delivery fee: $${deliveryFee.toFixed(2)} → platform $${platformDeliveryCut.toFixed(2)} / driver $${(deliveryFee - platformDeliveryCut).toFixed(2)}`,
+            `Total platform revenue: $${totalPlatformRevenue.toFixed(2)}`,
             `Supplier payout: $${supplierPayout.toFixed(2)}`,
             `Stripe fee: $${stripeFee.toFixed(2)}`
           ].join(' | '));

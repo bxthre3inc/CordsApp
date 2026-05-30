@@ -225,25 +225,30 @@ export default function DeliveryDashboard() {
                   <p className="text-sm">Check back soon</p>
                 </div>
               )}
-              {online && availableOrders.map(order => (
-                <div key={order.id} className="p-4 flex justify-between items-center">
-                  <div>
-                    <p className="font-semibold text-gray-900">{order.wood_type} × {order.quantity}</p>
-                    <p className="text-sm text-gray-500">from {order.supplier_name}</p>
-                    <p className="text-xs text-gray-400">${order.total_price} order value</p>
+              {online && availableOrders.map(order => {
+                const driverEarnings = parseFloat(order.delivery_fee || 0) * 0.80;
+                return (
+                  <div key={order.id} className="p-4 flex justify-between items-center">
+                    <div>
+                      <p className="font-semibold text-gray-900">{order.wood_type} × {order.quantity}</p>
+                      <p className="text-sm text-gray-500">from {order.supplier_name}</p>
+                      {parseFloat(order.stacking_fee || 0) > 0 && (
+                        <p className="text-xs text-amber-600">🪵 Stacking required</p>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <p className="font-bold text-green-600 text-lg">${driverEarnings.toFixed(2)}</p>
+                      <p className="text-xs text-gray-400 mb-2">your earnings</p>
+                      <button
+                        onClick={() => acceptOrder(order.id)}
+                        className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
+                      >
+                        Accept
+                      </button>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="font-bold text-green-600 text-lg">${(order.total_price * 0.08).toFixed(0)}</p>
-                    <p className="text-xs text-gray-400 mb-2">est. earnings</p>
-                    <button
-                      onClick={() => acceptOrder(order.id)}
-                      className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
-                    >
-                      Accept
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
@@ -263,7 +268,7 @@ export default function DeliveryDashboard() {
                     <p className="text-xs text-gray-400">{new Date(order.updated_at).toLocaleDateString()}</p>
                   </div>
                   <div className="text-right">
-                    <p className="font-semibold text-green-600">+${(order.total_price * 0.08).toFixed(2)}</p>
+                    <p className="font-semibold text-green-600">+${(parseFloat(order.delivery_fee || 0) * 0.80).toFixed(2)}</p>
                     <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">delivered</span>
                   </div>
                 </div>

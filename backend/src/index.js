@@ -4,11 +4,30 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
+// Redis-backed rate limiting when REDIS_URL is set; falls back to in-memory.
+// In-memory works for single-process dev; Redis is required for multi-instance prod.
+function buildStore() {
+  if (!process.env.REDIS_URL) return undefined; // express-rate-limit default (in-memory)
+  try {
+    const { RedisStore } = require('rate-limit-redis');
+    const Redis = require('ioredis');
+    const client = new Redis(process.env.REDIS_URL, { lazyConnect: true, enableOfflineQueue: false });
+    client.on('error', err => console.warn('[Redis] rate-limit store error:', err.message));
+    return new RedisStore({ sendCommand: (...args) => client.call(...args) });
+  } catch (e) {
+    console.warn('[Redis] rate-limit-redis unavailable, using memory store:', e.message);
+    return undefined;
+  }
+}
+
+const store = buildStore();
+
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
+  store,
   message: { error: 'Too many requests, please try again later' },
 });
 
@@ -17,6 +36,7 @@ const authLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  store,
   message: { error: 'Too many login attempts, please try again later' },
 });
 
@@ -68,7 +88,8 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`Cords API server running on port ${PORT}`);
+  const redisStatus = process.env.REDIS_URL ? '(Redis-backed)' : '(in-memory — set REDIS_URL for production)';
+  console.log(`Cords API server running on port ${PORT} | Rate limiting: ${redisStatus}`);
 });
 
 module.exports = app;

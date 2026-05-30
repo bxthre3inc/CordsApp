@@ -1,6 +1,8 @@
 const pool = require('../config/database');
 const emailService = require('../services/EmailService');
 
+const DRIVER_DELIVERY_RATE = 0.80;  // driver keeps 80% of delivery fee; platform keeps 20%
+
 class DeliveryController {
   static async getAssignedOrders(req, res) {
     try {
@@ -27,7 +29,8 @@ class DeliveryController {
   static async getAvailableOrders(req, res) {
     try {
       const result = await pool.query(`
-        SELECT o.*, p.wood_type,
+        SELECT o.id, o.quantity, o.delivery_fee, o.stacking_fee, o.delivery_type, o.created_at,
+          p.wood_type,
           u_b.first_name || ' ' || u_b.last_name as buyer_name,
           u_s.first_name || ' ' || u_s.last_name as supplier_name
         FROM orders o
@@ -81,7 +84,7 @@ class DeliveryController {
       }
 
       const check = await pool.query(
-        'SELECT id, delivery_team_id, total_price FROM orders WHERE id = $1',
+        'SELECT id, delivery_team_id, delivery_fee FROM orders WHERE id = $1',
         [id]
       );
       if (check.rows.length === 0) return res.status(404).json({ error: 'Order not found' });
@@ -110,7 +113,8 @@ class DeliveryController {
       }).catch(() => {});
 
       if (status === 'delivered') {
-        const deliveryFee = parseFloat(check.rows[0].total_price) * 0.08;
+        // Driver earns 80% of the delivery fee stored on the order
+        const deliveryFee = parseFloat(check.rows[0].delivery_fee || 0) * DRIVER_DELIVERY_RATE;
         await pool.query(`
           INSERT INTO delivery_profiles (user_id, earnings_today, earnings_week, earnings_total, jobs_completed)
           VALUES ($1, $2, $2, $2, 1)
@@ -154,7 +158,7 @@ class DeliveryController {
       const [profile, history] = await Promise.all([
         pool.query('SELECT * FROM delivery_profiles WHERE user_id = $1', [userId]),
         pool.query(`
-          SELECT o.id, o.total_price, o.status, o.updated_at, p.wood_type,
+          SELECT o.id, o.total_price, o.delivery_fee, o.status, o.updated_at, p.wood_type,
             u_b.first_name || ' ' || u_b.last_name as buyer_name
           FROM orders o
           JOIN products p ON o.product_id = p.id
