@@ -1,6 +1,8 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+// In production the nginx reverse proxy handles /api/* → backend Cloud Run.
+// In development the CRA proxy in package.json forwards to localhost:5000.
+const API_BASE_URL = process.env.REACT_APP_API_URL || '/api';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,

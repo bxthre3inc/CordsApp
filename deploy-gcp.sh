@@ -1,211 +1,227 @@
 #!/bin/bash
+# Cords — one-shot GCP setup and first deployment script.
+# Run this once to provision infrastructure; after that, Cloud Build handles CI/CD.
+#
+# Prerequisites: gcloud CLI, docker, psql (for migrations).
+# Install gcloud: https://cloud.google.com/sdk/docs/install
 
-# Cords GCP Deployment Script
-# This script automates the deployment of Cords to Google Cloud Platform
+set -euo pipefail
 
-set -e
+# ── Colour helpers ─────────────────────────────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+info()    { echo -e "${CYAN}$*${NC}"; }
+success() { echo -e "${GREEN}✓ $*${NC}"; }
+warn()    { echo -e "${YELLOW}⚠ $*${NC}"; }
+die()     { echo -e "${RED}✗ $*${NC}"; exit 1; }
 
-echo "🚀 Cords Google Cloud Deployment Script"
-echo "========================================"
+echo -e "${CYAN}  Cords — GCP Deployment Script${NC}"; echo ""
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+# ── Prerequisites ──────────────────────────────────────────────────────────────
+info "Checking prerequisites..."
+command -v gcloud >/dev/null || die "gcloud CLI not found. Install: https://cloud.google.com/sdk/docs/install"
+command -v docker  >/dev/null || die "Docker not found. Install: https://docs.docker.com/get-docker/"
+success "Prerequisites OK"
 
-# Check prerequisites
-echo -e "\n${YELLOW}Checking prerequisites...${NC}"
+# ── Configuration ──────────────────────────────────────────────────────────────
+echo ""; info "Configuration"
+PROJECT_ID="${GCP_PROJECT_ID:-ai-studio-applet-webapp-b7f1b}"
+echo "  GCP Project : $PROJECT_ID"
+read -rp "  Region [us-central1]: " REGION; REGION="${REGION:-us-central1}"
 
-if ! command -v gcloud &> /dev/null; then
-    echo -e "${RED}❌ gcloud CLI not installed${NC}"
-    echo "Install from: https://cloud.google.com/sdk/docs/install"
-    exit 1
-fi
-
-if ! command -v docker &> /dev/null; then
-    echo -e "${RED}❌ Docker not installed${NC}"
-    exit 1
-fi
-
-echo -e "${GREEN}✓ Prerequisites met${NC}"
-
-# Get configuration
-echo -e "\n${YELLOW}Configuration${NC}"
-read -p "Enter GCP Project ID: " PROJECT_ID
-read -p "Enter GCP Region (default: us-central1): " REGION
-REGION=${REGION:-us-central1}
-read -p "Enter your domain (e.g., cords.example.com): " DOMAIN
-
-# Set GCP project
-echo -e "\n${YELLOW}Setting up GCP project...${NC}"
-gcloud config set project $PROJECT_ID
-gcloud config set compute/region $REGION
-
-# Enable APIs
-echo -e "\n${YELLOW}Enabling required APIs...${NC}"
-gcloud services enable \
-    compute.googleapis.com \
-    run.googleapis.com \
-    cloudbuild.googleapis.com \
-    artifactregistry.googleapis.com \
-    sqladmin.googleapis.com \
-    storage-api.googleapis.com \
-    cloudresourcemanager.googleapis.com
-
-echo -e "${GREEN}✓ APIs enabled${NC}"
-
-# Create Artifact Registry
-echo -e "\n${YELLOW}Creating Artifact Registry...${NC}"
-if ! gcloud artifacts repositories describe cords-repo --location=$REGION &> /dev/null; then
-    gcloud artifacts repositories create cords-repo \
-        --repository-format=docker \
-        --location=$REGION
-    echo -e "${GREEN}✓ Artifact Registry created${NC}"
-else
-    echo -e "${GREEN}✓ Artifact Registry already exists${NC}"
-fi
-
-# Configure Docker
-echo -e "\n${YELLOW}Configuring Docker authentication...${NC}"
-gcloud auth configure-docker $REGION-docker.pkg.dev
-
-# Create Cloud SQL Instance
-echo -e "\n${YELLOW}Creating Cloud SQL instance...${NC}"
 INSTANCE_NAME="cords-postgres"
-DB_PASSWORD=$(openssl rand -base64 32)
+DB_NAME="cords_db"
+DB_USER="postgres"
+REGISTRY="$REGION-docker.pkg.dev/$PROJECT_ID/cords-repo"
+CLOUDSQL_CONN="$PROJECT_ID:$REGION:$INSTANCE_NAME"
 
-if ! gcloud sql instances describe $INSTANCE_NAME --region=$REGION &> /dev/null; then
-    gcloud sql instances create $INSTANCE_NAME \
-        --database-version=POSTGRES_14 \
-        --tier=db-f1-micro \
-        --region=$REGION \
-        --backup-start-time=03:00 \
-        --enable-bin-log \
-        --availability-type=REGIONAL \
-        --storage-size=10GB
-    
-    # Create database and user
-    gcloud sql databases create cords_db --instance=$INSTANCE_NAME
-    gcloud sql users create postgres --instance=$INSTANCE_NAME --password=$DB_PASSWORD
-    
-    echo -e "${GREEN}✓ Cloud SQL instance created${NC}"
-    echo -e "${YELLOW}Database password: $DB_PASSWORD (Save this!)${NC}"
+# ── GCP project setup ──────────────────────────────────────────────────────────
+echo ""; info "Configuring GCP project..."
+gcloud config set project "$PROJECT_ID" --quiet
+gcloud config set compute/region "$REGION" --quiet
+
+info "Enabling APIs (first time takes ~1 min)..."
+gcloud services enable \
+  run.googleapis.com cloudbuild.googleapis.com \
+  artifactregistry.googleapis.com sqladmin.googleapis.com \
+  secretmanager.googleapis.com cloudresourcemanager.googleapis.com \
+  --quiet
+success "APIs enabled"
+
+# ── Artifact Registry ──────────────────────────────────────────────────────────
+echo ""; info "Artifact Registry..."
+if ! gcloud artifacts repositories describe cords-repo --location="$REGION" &>/dev/null; then
+  gcloud artifacts repositories create cords-repo \
+    --repository-format=docker --location="$REGION" --quiet
+fi
+gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+success "Artifact Registry ready"
+
+# ── Cloud SQL ──────────────────────────────────────────────────────────────────
+echo ""; info "Cloud SQL (PostgreSQL 15)..."
+DB_PASSWORD=""
+if ! gcloud sql instances describe "$INSTANCE_NAME" &>/dev/null; then
+  DB_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=' | head -c 28)
+  info "Creating instance (3–5 min)..."
+  gcloud sql instances create "$INSTANCE_NAME" \
+    --database-version=POSTGRES_15 --tier=db-g1-small \
+    --region="$REGION" --storage-size=20GB --storage-auto-increase \
+    --backup-start-time=04:00 --quiet
+  gcloud sql databases create "$DB_NAME" --instance="$INSTANCE_NAME" --quiet
+  gcloud sql users set-password "$DB_USER" --instance="$INSTANCE_NAME" \
+    --password="$DB_PASSWORD" --quiet
+  success "Cloud SQL created"
 else
-    echo -e "${GREEN}✓ Cloud SQL instance already exists${NC}"
+  success "Cloud SQL already exists"
+  read -rsp "  Existing DB password: " DB_PASSWORD; echo
 fi
 
-# Get Cloud SQL connection string
-CLOUDSQL_CONNECTION=$(gcloud sql instances describe $INSTANCE_NAME \
-    --format='value(connectionName)')
-echo -e "${YELLOW}Cloud SQL Connection: $CLOUDSQL_CONNECTION${NC}"
+# ── Secret Manager ─────────────────────────────────────────────────────────────
+echo ""; info "Storing secrets in Secret Manager..."
 
-# Build and push Docker images
-echo -e "\n${YELLOW}Building and pushing Docker images...${NC}"
+put_secret() {
+  local name="$1" value="$2"
+  if gcloud secrets describe "$name" &>/dev/null; then
+    printf '%s' "$value" | gcloud secrets versions add "$name" --data-file=- --quiet
+  else
+    printf '%s' "$value" | gcloud secrets create "$name" --data-file=- --quiet
+  fi
+  success "secret: $name"
+}
 
-# Backend
-echo -e "${YELLOW}Building backend...${NC}"
-docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/cords-repo/backend:latest ./backend
-docker push $REGION-docker.pkg.dev/$PROJECT_ID/cords-repo/backend:latest
-echo -e "${GREEN}✓ Backend pushed${NC}"
+JWT_SECRET=$(openssl rand -base64 48 | tr -d '/+=')
+put_secret "db-password"  "$DB_PASSWORD"
+put_secret "jwt-secret"   "$JWT_SECRET"
 
-# Frontend
-echo -e "${YELLOW}Building frontend...${NC}"
-docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/cords-repo/frontend:latest ./frontend
-docker push $REGION-docker.pkg.dev/$PROJECT_ID/cords-repo/frontend:latest
-echo -e "${GREEN}✓ Frontend pushed${NC}"
+echo ""
+warn "Stripe keys — use TEST keys now, swap to live when ready."
+warn "Get them at: https://dashboard.stripe.com/test/apikeys"
+read -rsp "  Stripe Secret Key (sk_test_...): "      STRIPE_SK; echo
+read -rsp "  Stripe Publishable Key (pk_test_...): " STRIPE_PK; echo
+put_secret "stripe-secret"          "$STRIPE_SK"
+put_secret "stripe-publishable-key" "$STRIPE_PK"
+# Webhook secret is set after deploy — store a placeholder now
+put_secret "stripe-webhook-secret"  "placeholder_update_after_deploy"
 
-# Create secrets
-echo -e "\n${YELLOW}Creating secrets...${NC}"
+echo ""
+warn "Gmail SMTP — requires an App Password (not your login password)."
+warn "Enable at: https://myaccount.google.com/apppasswords  (needs 2FA on)"
+read -rp  "  Gmail address: "                        GMAIL_USER
+read -rsp "  Gmail App Password (16 chars): "        GMAIL_PASS; echo
+put_secret "smtp-user" "$GMAIL_USER"
+put_secret "smtp-pass" "$GMAIL_PASS"
+put_secret "smtp-from" "Cords <${GMAIL_USER}>"
 
-# Read sensitive values
-read -sp "Enter JWT Secret (or press Enter to generate): " JWT_SECRET
-JWT_SECRET=${JWT_SECRET:-$(openssl rand -base64 32)}
-echo
+# ── Cloud Build IAM permissions ────────────────────────────────────────────────
+echo ""; info "Granting Cloud Build service account permissions..."
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
+CB_SA="${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com"
+for role in roles/run.admin roles/iam.serviceAccountUser roles/cloudsql.client roles/secretmanager.secretAccessor; do
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:$CB_SA" --role="$role" --quiet
+done
+success "Cloud Build permissions set"
 
-read -sp "Enter Stripe Secret Key: " STRIPE_SECRET
-echo
+# ── Build and push Docker images ───────────────────────────────────────────────
+echo ""; info "Building Docker images..."
+docker build -t "$REGISTRY/backend:latest"  -f backend/Dockerfile  ./backend
+docker build -t "$REGISTRY/frontend:latest" -f frontend/Dockerfile ./frontend
+info "Pushing to Artifact Registry..."
+docker push "$REGISTRY/backend:latest"
+docker push "$REGISTRY/frontend:latest"
+success "Images built and pushed"
 
-read -sp "Enter Mapbox Token: " MAPBOX_TOKEN
-echo
-
-read -sp "Enter Stripe Public Key: " STRIPE_PUBLIC
-echo
-
-# Create secrets
-echo $JWT_SECRET | gcloud secrets create jwt-secret --data-file=- 2>/dev/null || \
-    echo $JWT_SECRET | gcloud secrets versions add jwt-secret --data-file=-
-
-echo $STRIPE_SECRET | gcloud secrets create stripe-secret --data-file=- 2>/dev/null || \
-    echo $STRIPE_SECRET | gcloud secrets versions add stripe-secret --data-file=-
-
-echo $MAPBOX_TOKEN | gcloud secrets create mapbox-token --data-file=- 2>/dev/null || \
-    echo $MAPBOX_TOKEN | gcloud secrets versions add mapbox-token --data-file=-
-
-echo $STRIPE_PUBLIC | gcloud secrets create stripe-public-key --data-file=- 2>/dev/null || \
-    echo $STRIPE_PUBLIC | gcloud secrets versions add stripe-public-key --data-file=-
-
-echo -e "${GREEN}✓ Secrets created${NC}"
-
-# Deploy to Cloud Run
-echo -e "\n${YELLOW}Deploying to Cloud Run...${NC}"
-
-# Backend
-echo -e "${YELLOW}Deploying backend...${NC}"
+# ── Deploy backend ─────────────────────────────────────────────────────────────
+echo ""; info "Deploying backend to Cloud Run..."
 gcloud run deploy cords-backend \
-    --image=$REGION-docker.pkg.dev/$PROJECT_ID/cords-repo/backend:latest \
-    --region=$REGION \
-    --platform=managed \
-    --memory=512Mi \
-    --cpu=1 \
-    --timeout=3600 \
-    --set-cloudsql-instances=$CLOUDSQL_CONNECTION \
-    --allow-unauthenticated \
-    --set-env-vars="DB_HOST=/cloudsql/$CLOUDSQL_CONNECTION,DB_PORT=5432,DB_NAME=cords_db,DB_USER=postgres,NODE_ENV=production" \
-    --update-secrets="DB_PASSWORD=db-password:latest,JWT_SECRET=jwt-secret:latest,STRIPE_SECRET_KEY=stripe-secret:latest,MAPBOX_TOKEN=mapbox-token:latest"
+  --image="$REGISTRY/backend:latest" \
+  --region="$REGION" --platform=managed \
+  --memory=512Mi --cpu=1 \
+  --min-instances=0 --max-instances=10 \
+  --timeout=60 --concurrency=100 \
+  --set-cloudsql-instances="$CLOUDSQL_CONN" \
+  --allow-unauthenticated \
+  --set-env-vars="NODE_ENV=production,PORT=8080,\
+DB_HOST=/cloudsql/$CLOUDSQL_CONN,DB_PORT=5432,DB_NAME=$DB_NAME,DB_USER=$DB_USER,\
+SMTP_HOST=smtp.gmail.com,SMTP_PORT=587,SMTP_SECURE=false" \
+  --update-secrets="\
+DB_PASSWORD=db-password:latest,\
+JWT_SECRET=jwt-secret:latest,\
+STRIPE_SECRET_KEY=stripe-secret:latest,\
+STRIPE_PUBLISHABLE_KEY=stripe-publishable-key:latest,\
+STRIPE_WEBHOOK_SECRET=stripe-webhook-secret:latest,\
+SMTP_USER=smtp-user:latest,\
+SMTP_PASS=smtp-pass:latest,\
+SMTP_FROM=smtp-from:latest" \
+  --quiet
 
-BACKEND_URL=$(gcloud run services describe cords-backend --region=$REGION --format='value(status.url)')
-echo -e "${GREEN}✓ Backend deployed to: $BACKEND_URL${NC}"
+BACKEND_URL=$(gcloud run services describe cords-backend \
+  --region="$REGION" --format='value(status.url)')
+success "Backend: $BACKEND_URL"
 
-# Frontend
-echo -e "${YELLOW}Deploying frontend...${NC}"
+# ── Deploy frontend ────────────────────────────────────────────────────────────
+echo ""; info "Deploying frontend to Cloud Run..."
 gcloud run deploy cords-frontend \
-    --image=$REGION-docker.pkg.dev/$PROJECT_ID/cords-repo/frontend:latest \
-    --region=$REGION \
-    --platform=managed \
-    --memory=256Mi \
-    --allow-unauthenticated \
-    --set-env-vars="REACT_APP_API_URL=$BACKEND_URL/api" \
-    --update-secrets="REACT_APP_MAPBOX_TOKEN=mapbox-token:latest,REACT_APP_STRIPE_KEY=stripe-public-key:latest"
+  --image="$REGISTRY/frontend:latest" \
+  --region="$REGION" --platform=managed \
+  --memory=256Mi --cpu=1 \
+  --min-instances=0 --max-instances=5 \
+  --timeout=30 --allow-unauthenticated \
+  --set-env-vars="BACKEND_URL=$BACKEND_URL" \
+  --quiet
 
-FRONTEND_URL=$(gcloud run services describe cords-frontend --region=$REGION --format='value(status.url)')
-echo -e "${GREEN}✓ Frontend deployed to: $FRONTEND_URL${NC}"
+FRONTEND_URL=$(gcloud run services describe cords-frontend \
+  --region="$REGION" --format='value(status.url)')
+success "Frontend: $FRONTEND_URL"
 
-# Summary
-echo -e "\n${GREEN}========================================${NC}"
-echo -e "${GREEN}✓ Deployment Complete!${NC}"
-echo -e "${GREEN}========================================${NC}"
+# ── Database migrations ────────────────────────────────────────────────────────
+echo ""; info "Running database migrations via Cloud SQL Auth Proxy..."
+warn "This step requires psql to be installed (brew install postgresql / apt install postgresql-client)."
 
-echo -e "\n${YELLOW}Deployment URLs:${NC}"
-echo -e "Frontend: ${GREEN}$FRONTEND_URL${NC}"
-echo -e "Backend API: ${GREEN}$BACKEND_URL/api${NC}"
+PROXY_BIN="/tmp/cloud-sql-proxy"
+if [ ! -f "$PROXY_BIN" ]; then
+  info "Downloading Cloud SQL Auth Proxy..."
+  curl -sSL \
+    "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.9.0/cloud-sql-proxy.linux.amd64" \
+    -o "$PROXY_BIN" && chmod +x "$PROXY_BIN"
+fi
 
-echo -e "\n${YELLOW}Important Information:${NC}"
-echo -e "Database: cords_db"
-echo -e "Database User: postgres"
-echo -e "Database Password: $DB_PASSWORD"
-echo -e "Cloud SQL Connection: $CLOUDSQL_CONNECTION"
+"$PROXY_BIN" --port=15432 "$CLOUDSQL_CONN" &
+PROXY_PID=$!
+sleep 4
 
-echo -e "\n${YELLOW}Next Steps:${NC}"
-echo "1. Update your domain DNS to point to the frontend URL"
-echo "2. Configure SSL certificate"
-echo "3. Run database migrations:"
-echo "   gcloud sql connect $INSTANCE_NAME --user=postgres < database/schema.sql"
-echo "4. Test the deployment: curl $BACKEND_URL/api/health"
-echo "5. Visit $FRONTEND_URL in your browser"
+for sql_file in database/schema.sql database/migration_*.sql; do
+  [ -f "$sql_file" ] || continue
+  info "  $sql_file"
+  PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -p 15432 -U "$DB_USER" -d "$DB_NAME" -f "$sql_file" -q
+done
 
-echo -e "\n${YELLOW}Save these credentials securely!${NC}"
-echo "Database Password: $DB_PASSWORD"
-echo "JWT Secret: $JWT_SECRET"
+kill "$PROXY_PID" 2>/dev/null || true
+success "Migrations complete"
 
-echo -e "\n${GREEN}For more information, see docs/GCP_DEPLOYMENT.md${NC}"
+# ── Done ───────────────────────────────────────────────────────────────────────
+echo ""
+echo -e "${GREEN}════════════════════════════════════════${NC}"
+echo -e "${GREEN}  Deployment complete!${NC}"
+echo -e "${GREEN}════════════════════════════════════════${NC}"
+echo ""
+echo "  App  : $FRONTEND_URL"
+echo "  API  : $BACKEND_URL"
+echo "  Test : curl $BACKEND_URL/api/health"
+echo ""
+echo -e "${YELLOW}Required next step — register Stripe webhook:${NC}"
+echo "  1. Go to https://dashboard.stripe.com/test/webhooks"
+echo "  2. Add endpoint: $BACKEND_URL/api/payments/webhook"
+echo "  3. Select events: payment_intent.succeeded, customer.subscription.*"
+echo "  4. Copy the signing secret (whsec_...) then run:"
+echo ""
+echo "     echo 'whsec_YOUR_SECRET' | \\"
+echo "       gcloud secrets versions add stripe-webhook-secret --data-file=-"
+echo "     gcloud run services update cords-backend --region=$REGION \\"
+echo "       --update-secrets=STRIPE_WEBHOOK_SECRET=stripe-webhook-secret:latest"
+echo ""
+echo -e "${YELLOW}Wire up CI/CD (push-to-deploy):${NC}"
+echo "  https://console.cloud.google.com/cloud-build/triggers?project=$PROJECT_ID"
+echo "  → Create trigger → GitHub → Branch: main → Config: cloudbuild.yaml"
+echo ""
+echo -e "${YELLOW}Save securely (already in Secret Manager):${NC}"
+echo "  DB Password : $DB_PASSWORD"

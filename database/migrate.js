@@ -1,30 +1,42 @@
+// Run schema.sql then all migration_*.sql files in alphabetical order.
+// All files use IF NOT EXISTS / ADD COLUMN IF NOT EXISTS, so this is idempotent.
+// Usage: node database/migrate.js
+//        (requires DB_* env vars or a local .env)
+
+require('dotenv').config({ path: require('path').join(__dirname, '../backend/.env') });
+
 const pool = require('../backend/src/config/database');
-const fs = require('fs');
+const fs   = require('fs');
 const path = require('path');
 
-async function runMigrations() {
-  try {
-    console.log('Starting database migrations...');
+const SQL_DIR = __dirname;
 
-    const schemaPath = path.join(__dirname, 'schema.sql');
-    const schema = fs.readFileSync(schemaPath, 'utf8');
-
-    // Split and execute each statement
-    const statements = schema.split(';').filter(stmt => stmt.trim());
-
-    for (const statement of statements) {
-      if (statement.trim()) {
-        await pool.query(statement);
-        console.log('✓ Executed migration statement');
-      }
-    }
-
-    console.log('✓ All migrations completed successfully');
-    process.exit(0);
-  } catch (error) {
-    console.error('Migration failed:', error);
-    process.exit(1);
-  }
+async function runFile(filePath) {
+  const sql = fs.readFileSync(filePath, 'utf8');
+  await pool.query(sql);
+  console.log(`  ✓ ${path.basename(filePath)}`);
 }
 
-runMigrations();
+async function runMigrations() {
+  console.log('Running Cords database migrations...\n');
+
+  // 1. Base schema
+  await runFile(path.join(SQL_DIR, 'schema.sql'));
+
+  // 2. All migration files in alphabetical order
+  const migrations = fs.readdirSync(SQL_DIR)
+    .filter(f => f.startsWith('migration_') && f.endsWith('.sql'))
+    .sort();
+
+  for (const file of migrations) {
+    await runFile(path.join(SQL_DIR, file));
+  }
+
+  console.log('\nAll migrations complete.');
+  await pool.end();
+}
+
+runMigrations().catch(err => {
+  console.error('Migration failed:', err.message);
+  process.exit(1);
+});
