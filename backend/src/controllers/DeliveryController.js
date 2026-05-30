@@ -1,4 +1,5 @@
 const pool = require('../config/database');
+const emailService = require('../services/EmailService');
 
 class DeliveryController {
   static async getAssignedOrders(req, res) {
@@ -92,6 +93,21 @@ class DeliveryController {
         'UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
         [status, id]
       );
+
+      // Email buyer — non-blocking
+      pool.query(`
+        SELECT u.email, o.gate_code, o.delivery_notes, p.wood_type, o.quantity
+        FROM orders o
+        JOIN users u ON o.buyer_id = u.id
+        JOIN products p ON o.product_id = p.id
+        WHERE o.id = $1
+      `, [id]).then(r => {
+        const row = r.rows[0];
+        if (row?.email) {
+          if (status === 'in_transit') emailService.orderInTransit(row.email, row).catch(() => {});
+          if (status === 'delivered') emailService.orderDelivered(row.email, row).catch(() => {});
+        }
+      }).catch(() => {});
 
       if (status === 'delivered') {
         const deliveryFee = parseFloat(check.rows[0].total_price) * 0.08;

@@ -83,6 +83,12 @@ export const adminService = {
   toggleProduct: (id) => apiClient.put(`/admin/products/${id}/toggle`),
 };
 
+export const subscriptionService = {
+  getMyPlan: () => apiClient.get('/subscriptions/my-plan'),
+  checkout: (planType) => apiClient.post('/subscriptions/checkout', { planType }),
+  cancel: () => apiClient.delete('/subscriptions'),
+};
+
 export const enterpriseService = {
   submitInquiry: (data) => apiClient.post('/enterprise/inquiry', data),
   getMyContract: () => apiClient.get('/enterprise/contract/me'),

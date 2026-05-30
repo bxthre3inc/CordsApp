@@ -58,7 +58,8 @@ class Order {
 
   static async findByBuyer(buyerId) {
     const query = `
-      SELECT o.*, p.wood_type, p.unit, u.first_name as supplier_name
+      SELECT o.*, p.wood_type, p.unit,
+        u.first_name || ' ' || u.last_name as supplier_name
       FROM orders o
       JOIN products p ON o.product_id = p.id
       JOIN users u ON o.supplier_id = u.id

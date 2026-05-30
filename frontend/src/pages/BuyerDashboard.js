@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { productService, orderService } from '../services/api';
+import { productService, orderService, paymentService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import DeliveryLocationPicker from '../components/DeliveryLocationPicker';
 
@@ -17,6 +17,135 @@ const STATUS_COLORS = {
   delivered: 'bg-green-100 text-green-700',
   cancelled: 'bg-red-100 text-red-700',
 };
+
+const STATUS_LABELS = {
+  pending: 'Awaiting supplier confirmation',
+  confirmed: 'Confirmed — driver will be assigned',
+  in_transit: 'Out for delivery',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
+};
+
+function BuyerOrderDetailModal({ order, onClose, onPay }) {
+  const [paying, setPaying] = useState(false);
+  if (!order) return null;
+
+  const hasStacking = parseFloat(order.stacking_fee || 0) > 0;
+  const isPickup = order.delivery_type === 'pickup';
+
+  const handlePay = async () => {
+    setPaying(true);
+    try {
+      const res = await onPay(order.id);
+      if (res?.checkoutUrl) window.location.href = res.checkoutUrl;
+    } finally {
+      setPaying(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center px-6 pt-5 pb-3 border-b border-gray-100">
+          <h2 className="text-lg font-bold text-gray-900">Order #{order.id}</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="font-semibold text-gray-900 text-lg">{order.wood_type} × {order.quantity} {order.unit || 'cords'}</p>
+              <p className="text-sm text-gray-500">from {order.supplier_name}</p>
+            </div>
+            <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLORS[order.status]}`}>{order.status}</span>
+          </div>
+
+          <div className="text-sm text-gray-500 bg-gray-50 rounded-xl p-3">
+            {STATUS_LABELS[order.status]}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="bg-gray-50 rounded-xl p-3">
+              <p className="text-xs text-gray-400 uppercase font-medium mb-1">Order date</p>
+              <p className="font-medium text-gray-900">{new Date(order.created_at).toLocaleDateString()}</p>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3">
+              <p className="text-xs text-gray-400 uppercase font-medium mb-1">Delivery</p>
+              <p className="font-medium text-gray-900 capitalize">{isPickup ? 'Pickup' : order.delivery_type || 'Standard'}</p>
+            </div>
+          </div>
+
+          {order.gate_code && (
+            <div className="flex items-center gap-3 bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3">
+              <span className="text-xl">🔑</span>
+              <div>
+                <p className="text-xs text-yellow-700 font-medium uppercase tracking-wide">Your Gate / Door Code</p>
+                <p className="text-base font-mono font-bold text-yellow-900">{order.gate_code}</p>
+                <p className="text-xs text-yellow-600 mt-0.5">Shared with driver on delivery</p>
+              </div>
+            </div>
+          )}
+
+          {order.delivery_notes && (
+            <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
+              <p className="text-xs text-blue-600 font-medium uppercase tracking-wide mb-1">Delivery Notes</p>
+              <p className="text-sm text-blue-900">{order.delivery_notes}</p>
+            </div>
+          )}
+
+          {hasStacking && (
+            <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 text-xs text-amber-800">
+              <span>🪵</span>
+              <span><strong>Hand stacking included</strong> — ${parseFloat(order.stacking_fee).toFixed(2)}</span>
+            </div>
+          )}
+
+          <div className="border-t border-gray-100 pt-4 space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-gray-500">Wood</span>
+              <span>${(parseFloat(order.total_price) - parseFloat(order.stacking_fee || 0)).toFixed(2)}</span>
+            </div>
+            {hasStacking && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">Hand stacking</span>
+                <span>${parseFloat(order.stacking_fee).toFixed(2)}</span>
+              </div>
+            )}
+            {!isPickup && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">{order.delivery_type === 'express' ? 'Express' : 'Standard'} delivery</span>
+                <span>${order.delivery_type === 'express' ? '45.00' : '25.00'}</span>
+              </div>
+            )}
+            {order.buyer_processing_fee > 0 && (
+              <div className="flex justify-between text-gray-400 text-xs">
+                <span>Processing fee (2%)</span>
+                <span>${parseFloat(order.buyer_processing_fee).toFixed(2)}</span>
+              </div>
+            )}
+            <div className="flex justify-between font-bold text-base pt-2 border-t border-gray-200">
+              <span>Total charged</span>
+              <span>${parseFloat(order.total_price).toFixed(2)}</span>
+            </div>
+          </div>
+
+          {order.payment_status !== 'completed' && order.status !== 'cancelled' && (
+            <button onClick={handlePay} disabled={paying}
+              className="w-full py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 text-sm">
+              {paying ? 'Redirecting...' : 'Pay Now'}
+            </button>
+          )}
+
+          {order.payment_status === 'completed' && (
+            <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm">
+              <span>✓</span><span className="font-medium">Payment complete</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function BuyerDashboard() {
   const { user, logout } = useAuth();
@@ -39,6 +168,7 @@ export default function BuyerDashboard() {
   });
   const [ordering, setOrdering] = useState(false);
   const [toast, setToast] = useState(null);
+  const [detailOrder, setDetailOrder] = useState(null);
 
   useEffect(() => {
     if (navigator.geolocation) {
@@ -234,15 +364,21 @@ export default function BuyerDashboard() {
                 </div>
               )}
               {orders.map(o => (
-                <div key={o.id} className="p-5 flex justify-between items-center">
+                <div key={o.id} className="p-5 flex justify-between items-center hover:bg-gray-50 cursor-pointer" onClick={() => setDetailOrder(o)}>
                   <div>
-                    <p className="font-semibold text-gray-900">{o.wood_type} × {o.quantity} cords</p>
-                    <p className="text-sm text-gray-500">from {o.supplier_name} · {o.delivery_type}</p>
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <p className="font-semibold text-gray-900">{o.wood_type} × {o.quantity} cords</p>
+                      {parseFloat(o.stacking_fee || 0) > 0 && <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">🪵 Stack</span>}
+                    </div>
+                    <p className="text-sm text-gray-500">from {o.supplier_name} · {o.delivery_type === 'pickup' ? 'Pickup' : o.delivery_type || 'Standard'}</p>
                     <p className="text-xs text-gray-400">{new Date(o.created_at).toLocaleDateString()}</p>
                   </div>
                   <div className="text-right">
                     <p className="font-bold text-gray-900">${parseFloat(o.total_price).toFixed(2)}</p>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[o.status]}`}>{o.status}</span>
+                    {o.payment_status !== 'completed' && o.status !== 'cancelled' && (
+                      <p className="text-xs text-blue-600 mt-1">Payment due →</p>
+                    )}
                   </div>
                 </div>
               ))}
@@ -250,6 +386,17 @@ export default function BuyerDashboard() {
           </div>
         )}
       </div>
+
+      {detailOrder && (
+        <BuyerOrderDetailModal
+          order={detailOrder}
+          onClose={() => setDetailOrder(null)}
+          onPay={async (orderId) => {
+            const res = await paymentService.createOrderPayment(orderId);
+            return res.data;
+          }}
+        />
+      )}
 
       {/* Order modal */}
       {orderModal && (

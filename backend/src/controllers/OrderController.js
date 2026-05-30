@@ -1,5 +1,7 @@
 const Order = require('../models/Order');
 const Product = require('../models/Product');
+const pool = require('../config/database');
+const emailService = require('../services/EmailService');
 
 const STACKING_FEE_PER_CORD = 15.00;   // required on all delivery orders
 const DELIVERY_FEE_STANDARD  = 25.00;
@@ -51,6 +53,18 @@ class OrderController {
         gateCode: isPickup ? null : (gateCode || null),
         deliveryNotes: deliveryNotes || null,
       });
+
+      // Email supplier — non-blocking
+      pool.query(
+        'SELECT u.email, u.first_name FROM users u WHERE u.id = $1',
+        [product.supplier_id]
+      ).then(r => {
+        const supplier = r.rows[0];
+        if (supplier?.email) {
+          const orderWithType = { ...order, wood_type: product.wood_type, unit: product.unit, delivery_type: deliveryType };
+          emailService.orderPlaced(supplier.email, orderWithType).catch(() => {});
+        }
+      }).catch(() => {});
 
       res.status(201).json({
         message: 'Order created successfully',
@@ -109,6 +123,18 @@ class OrderController {
       const { id } = req.params;
       const { status } = req.body;
       const order = await Order.updateStatus(id, status);
+
+      if (status === 'confirmed') {
+        pool.query(`
+          SELECT u.email, o.gate_code, p.wood_type, o.quantity
+          FROM orders o JOIN users u ON o.buyer_id = u.id JOIN products p ON o.product_id = p.id
+          WHERE o.id = $1
+        `, [id]).then(r => {
+          const row = r.rows[0];
+          if (row?.email) emailService.orderConfirmed(row.email, { ...order, ...row }).catch(() => {});
+        }).catch(() => {});
+      }
+
       res.json({ message: 'Order status updated', order });
     } catch (error) {
       console.error(error);

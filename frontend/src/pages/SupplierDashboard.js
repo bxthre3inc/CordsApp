@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { orderService, productService } from '../services/api';
+import { orderService, productService, subscriptionService, paymentService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
 const STATUS_COLORS = {
@@ -12,6 +12,139 @@ const STATUS_COLORS = {
 
 const woodTypes = ['Oak', 'Maple', 'Pine', 'Cherry', 'Walnut', 'Birch', 'Ash', 'Cedar'];
 
+const PLANS = [
+  {
+    key: 'free',
+    name: 'Free',
+    price: '$0/mo',
+    commission: '20% commission',
+    features: ['Up to 5 listings', 'Basic analytics'],
+    color: 'border-gray-200',
+  },
+  {
+    key: 'starter',
+    name: 'Starter',
+    price: '$29.99/mo',
+    commission: '10% commission',
+    features: ['Unlimited listings', 'Pickup option', 'Priority support'],
+    color: 'border-blue-300',
+  },
+  {
+    key: 'professional',
+    name: 'Professional',
+    price: '$99.99/mo',
+    commission: '5% commission',
+    features: ['Featured in search', 'Custom branding', 'API access'],
+    color: 'border-purple-400',
+    badge: 'Best Value',
+  },
+  {
+    key: 'enterprise',
+    name: 'Enterprise',
+    price: 'Custom',
+    commission: '0% commission',
+    features: ['Flat rate per cord or month', 'Negotiated delivery cut', 'Account manager', 'SLA'],
+    color: 'border-orange-400',
+  },
+];
+
+function OrderDetailModal({ order, onClose }) {
+  if (!order) return null;
+  const hasStacking = parseFloat(order.stacking_fee || 0) > 0;
+  const isPickup = order.delivery_type === 'pickup';
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center px-6 pt-5 pb-3 border-b border-gray-100">
+          <h2 className="text-lg font-bold text-gray-900">Order #{order.id}</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="font-semibold text-gray-900 text-lg">{order.wood_type} × {order.quantity} {order.unit || 'cords'}</p>
+              <p className="text-sm text-gray-500">Buyer: {order.buyer_name}</p>
+              {order.buyer_phone && <p className="text-sm text-gray-500">{order.buyer_phone}</p>}
+            </div>
+            <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLORS[order.status]}`}>{order.status}</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="bg-gray-50 rounded-xl p-3">
+              <p className="text-xs text-gray-400 uppercase font-medium mb-1">Order date</p>
+              <p className="font-medium text-gray-900">{new Date(order.created_at).toLocaleDateString()}</p>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3">
+              <p className="text-xs text-gray-400 uppercase font-medium mb-1">Delivery</p>
+              <p className="font-medium text-gray-900 capitalize">{isPickup ? 'Pickup' : order.delivery_type || 'Standard'}</p>
+            </div>
+          </div>
+
+          {!isPickup && order.delivery_location && (
+            <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
+              <p className="text-xs text-blue-600 font-medium uppercase tracking-wide mb-1">Delivery address</p>
+              <p className="text-sm text-blue-900">
+                {typeof order.delivery_location === 'object'
+                  ? `${order.delivery_location.lat?.toFixed(5)}, ${order.delivery_location.lng?.toFixed(5)}`
+                  : order.delivery_location}
+              </p>
+            </div>
+          )}
+
+          {order.gate_code && (
+            <div className="flex items-center gap-3 bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3">
+              <span className="text-xl">🔑</span>
+              <div>
+                <p className="text-xs text-yellow-700 font-medium uppercase tracking-wide">Gate / Door Code</p>
+                <p className="text-base font-mono font-bold text-yellow-900">{order.gate_code}</p>
+              </div>
+            </div>
+          )}
+
+          {order.delivery_notes && (
+            <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
+              <p className="text-xs text-blue-600 font-medium uppercase tracking-wide mb-1">Buyer Notes</p>
+              <p className="text-sm text-blue-900">{order.delivery_notes}</p>
+            </div>
+          )}
+
+          {hasStacking && (
+            <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 text-xs text-amber-800">
+              <span>🪵</span>
+              <span><strong>Hand stacking requested</strong> — buyer paid ${parseFloat(order.stacking_fee).toFixed(2)}</span>
+            </div>
+          )}
+
+          <div className="border-t border-gray-100 pt-4 space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-gray-500">Wood cost</span>
+              <span className="font-medium">${(parseFloat(order.total_price) - parseFloat(order.stacking_fee || 0)).toFixed(2)}</span>
+            </div>
+            {hasStacking && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">Stacking fee</span>
+                <span className="font-medium">${parseFloat(order.stacking_fee).toFixed(2)}</span>
+              </div>
+            )}
+            <div className="flex justify-between font-semibold">
+              <span>Your revenue (before commission)</span>
+              <span className="text-green-700">${parseFloat(order.total_price).toFixed(2)}</span>
+            </div>
+            {order.seller_processing_fee > 0 && (
+              <div className="flex justify-between text-xs text-gray-400">
+                <span>Processing fee (2%)</span>
+                <span>−${parseFloat(order.seller_processing_fee).toFixed(2)}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SupplierDashboard() {
   const { user, logout } = useAuth();
   const [products, setProducts] = useState([]);
@@ -20,6 +153,9 @@ export default function SupplierDashboard() {
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [planData, setPlanData] = useState(null);
+  const [planLoading, setPlanLoading] = useState(false);
   const [newProduct, setNewProduct] = useState({
     woodType: '', quantity: '', unit: 'cord', pricePerUnit: '', description: '',
     pickupAvailable: false, pickupAddress: ''
@@ -41,6 +177,21 @@ export default function SupplierDashboard() {
       setProducts(pRes.data);
       setOrders(oRes.data);
     } catch { showToast('Failed to load data', 'error'); }
+  };
+
+  const loadPlan = async () => {
+    if (planData) return;
+    setPlanLoading(true);
+    try {
+      const res = await subscriptionService.getMyPlan();
+      setPlanData(res.data);
+    } catch { showToast('Failed to load plan info', 'error'); }
+    finally { setPlanLoading(false); }
+  };
+
+  const handleTabChange = (t) => {
+    setTab(t);
+    if (t === 'plan') loadPlan();
   };
 
   const handleAddProduct = async (e) => {
@@ -90,6 +241,27 @@ export default function SupplierDashboard() {
     } catch { showToast('Failed to confirm order', 'error'); }
   };
 
+  const handleUpgrade = async (planKey) => {
+    if (planKey === 'enterprise') {
+      window.location.href = '/enterprise';
+      return;
+    }
+    try {
+      const res = await paymentService.createSubscription(planKey);
+      if (res.data.checkoutUrl) window.location.href = res.data.checkoutUrl;
+    } catch { showToast('Failed to start checkout', 'error'); }
+  };
+
+  const handleCancelPlan = async () => {
+    if (!window.confirm('Cancel your subscription? You will be downgraded to the free plan.')) return;
+    try {
+      await subscriptionService.cancel();
+      setPlanData(null);
+      showToast('Subscription cancelled');
+      loadPlan();
+    } catch { showToast('Failed to cancel', 'error'); }
+  };
+
   const pendingCount = orders.filter(o => o.status === 'pending').length;
   const monthRevenue = orders.filter(o => o.status === 'delivered').reduce((sum, o) => sum + parseFloat(o.total_price || 0), 0);
 
@@ -100,6 +272,8 @@ export default function SupplierDashboard() {
           {toast.msg}
         </div>
       )}
+
+      {selectedOrder && <OrderDetailModal order={selectedOrder} onClose={() => setSelectedOrder(null)} />}
 
       <header className="bg-white shadow-sm px-6 py-4 flex justify-between items-center">
         <span className="text-xl font-bold text-gray-900">🪵 Cords Supplier</span>
@@ -125,10 +299,14 @@ export default function SupplierDashboard() {
         </div>
 
         <div className="flex gap-2 mb-6">
-          {['orders', 'inventory'].map(t => (
-            <button key={t} onClick={() => setTab(t)}
-              className={`px-5 py-2 rounded-lg text-sm font-medium capitalize ${tab === t ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:border-blue-300'}`}>
-              {t === 'orders' ? `Orders${pendingCount > 0 ? ` (${pendingCount} pending)` : ''}` : 'Inventory'}
+          {[
+            { key: 'orders', label: `Orders${pendingCount > 0 ? ` (${pendingCount} pending)` : ''}` },
+            { key: 'inventory', label: 'Inventory' },
+            { key: 'plan', label: 'My Plan' },
+          ].map(t => (
+            <button key={t.key} onClick={() => handleTabChange(t.key)}
+              className={`px-5 py-2 rounded-lg text-sm font-medium ${tab === t.key ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:border-blue-300'}`}>
+              {t.label}
             </button>
           ))}
         </div>
@@ -143,12 +321,13 @@ export default function SupplierDashboard() {
                 </div>
               )}
               {orders.map(o => (
-                <div key={o.id} className="p-5 flex justify-between items-start">
+                <div key={o.id} className="p-5 flex justify-between items-start hover:bg-gray-50 cursor-pointer" onClick={() => setSelectedOrder(o)}>
                   <div>
                     <div className="flex items-center gap-2 mb-1">
                       <p className="font-semibold text-gray-900">{o.wood_type} × {o.quantity} cords</p>
                       {o.delivery_type === 'pickup' && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Pickup</span>}
                       {o.delivery_type === 'express' && <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">Express</span>}
+                      {parseFloat(o.stacking_fee || 0) > 0 && <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">🪵 Stack</span>}
                     </div>
                     <p className="text-sm text-gray-500">Buyer: {o.buyer_name}</p>
                     <p className="text-xs text-gray-400">{new Date(o.created_at).toLocaleDateString()}</p>
@@ -157,7 +336,7 @@ export default function SupplierDashboard() {
                     <p className="font-bold text-gray-900">${parseFloat(o.total_price).toFixed(2)}</p>
                     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[o.status]}`}>{o.status}</span>
                     {o.status === 'pending' && (
-                      <button onClick={() => confirmOrder(o.id)}
+                      <button onClick={e => { e.stopPropagation(); confirmOrder(o.id); }}
                         className="text-xs px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                         Confirm
                       </button>
@@ -274,6 +453,78 @@ export default function SupplierDashboard() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {tab === 'plan' && (
+          <div>
+            {planLoading && <p className="text-gray-400 text-center py-8">Loading plan info...</p>}
+            {planData && (
+              <div>
+                <div className="bg-white rounded-xl shadow p-6 mb-6">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="text-xs text-gray-400 uppercase font-medium mb-1">Current Plan</p>
+                      <h2 className="text-2xl font-bold text-gray-900">{planData.plan.name}</h2>
+                      <p className="text-gray-500 text-sm mt-1">
+                        {planData.accountType === 'free'
+                          ? '20% commission on every order'
+                          : planData.accountType === 'enterprise'
+                          ? '0% commission — flat rate billing'
+                          : `${Math.round(planData.plan.commission * 100)}% commission per order`}
+                      </p>
+                    </div>
+                    {planData.activeSubscription && planData.accountType !== 'free' && planData.accountType !== 'enterprise' && (
+                      <button onClick={handleCancelPlan}
+                        className="text-sm text-red-500 hover:text-red-700 border border-red-200 rounded-lg px-3 py-1.5">
+                        Cancel plan
+                      </button>
+                    )}
+                  </div>
+                  {planData.activeSubscription && (
+                    <p className="text-xs text-gray-400 mt-3">
+                      Renews {new Date(planData.activeSubscription.end_date).toLocaleDateString()}
+                    </p>
+                  )}
+                </div>
+
+                <h3 className="text-lg font-bold text-gray-900 mb-4">Upgrade your plan</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {PLANS.map(plan => {
+                    const isCurrent = planData.accountType === plan.key;
+                    return (
+                      <div key={plan.key} className={`bg-white rounded-xl border-2 ${plan.color} p-5 relative flex flex-col`}>
+                        {plan.badge && (
+                          <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 bg-purple-600 text-white text-xs font-semibold rounded-full">{plan.badge}</span>
+                        )}
+                        <div className="mb-3">
+                          <h4 className="font-bold text-gray-900">{plan.name}</h4>
+                          <p className="text-lg font-semibold text-gray-900 mt-1">{plan.price}</p>
+                          <p className="text-xs text-green-700 font-medium">{plan.commission}</p>
+                        </div>
+                        <ul className="text-xs text-gray-500 space-y-1 mb-4 flex-1">
+                          {plan.features.map(f => <li key={f}>✓ {f}</li>)}
+                        </ul>
+                        {isCurrent ? (
+                          <div className="w-full py-2 text-center text-sm font-medium bg-gray-100 text-gray-500 rounded-lg">Current plan</div>
+                        ) : (
+                          <button
+                            onClick={() => handleUpgrade(plan.key)}
+                            className="w-full py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                          >
+                            {plan.key === 'enterprise' ? 'Contact us' : 'Upgrade'}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <p className="text-xs text-gray-400 mt-4 text-center">
+                  All plans include the 2% buyer + 2% seller processing fee. Annual contracts available at 15% discount.
+                </p>
+              </div>
+            )}
           </div>
         )}
       </div>
